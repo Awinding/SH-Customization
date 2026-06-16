@@ -97,8 +97,17 @@ function roundRectPts(cx,cy,w,h,r){
   return pts;
 }
 
-function buildGeos(W,D,H,cornerR,dividers){
+function extrudeUp(shape,wallH,f,D){
+  const opt = f>0 ? {depth:Math.max(0.5,wallH-2*f),bevelEnabled:true,bevelThickness:f,bevelSize:f,bevelSegments:3,curveSegments:32}
+                  : {depth:wallH,bevelEnabled:false,curveSegments:32};
+  const g=new THREE.ExtrudeGeometry(shape,opt);
+  g.rotateX(-Math.PI/2); g.translate(0,BASE,D);
+  return g;
+}
+function buildGeos(W,D,H,cornerR,dividers,fr){
   const geos=[];
+  const wallH=Math.max(0.5,H-BASE);
+  const f=Math.max(0, Math.min(fr||0, WALL/2-0.05, wallH/2-0.3)); // 導角不超過牆厚一半/牆高一半
   const baseGeo=new THREE.BoxGeometry(W,BASE,D); baseGeo.translate(W/2,BASE/2,D/2); geos.push(baseGeo);
   const outer=roundRectPts(W/2,D/2,W,D,cornerR);
   const shape=new THREE.Shape(); shape.moveTo(outer[0][0],outer[0][1]);
@@ -108,15 +117,14 @@ function buildGeos(W,D,H,cornerR,dividers){
   const hole=new THREE.Path(); hole.moveTo(inn[0][0],inn[0][1]);
   for(let i=1;i<inn.length;i++) hole.lineTo(inn[i][0],inn[i][1]); hole.closePath();
   shape.holes.push(hole);
-  const wallH=Math.max(0.5,H-BASE);
-  const walls=new THREE.ExtrudeGeometry(shape,{depth:wallH,bevelEnabled:false,curveSegments:48});
-  walls.rotateX(-Math.PI/2); walls.translate(0,BASE,D); geos.push(walls);
-  for(const dv of dividers){ let g;
-    if(dv.dir==="v"){ const a=dv.a!=null?dv.a:WALL,b=dv.b!=null?dv.b:(D-WALL); const len=Math.max(0.5,b-a);
-      g=new THREE.BoxGeometry(WALL,wallH,len); g.translate(dv.pos,BASE+wallH/2,(a+b)/2); }
-    else { const a=dv.a!=null?dv.a:WALL,b=dv.b!=null?dv.b:(W-WALL); const len=Math.max(0.5,b-a);
-      g=new THREE.BoxGeometry(len,wallH,WALL); g.translate((a+b)/2,BASE+wallH/2,dv.pos); }
-    geos.push(g);
+  geos.push(extrudeUp(shape,wallH,f,D));
+  for(const dv of dividers){
+    const a=dv.a!=null?dv.a:WALL, b=dv.b!=null?dv.b:((dv.dir==="v"?D:W)-WALL);
+    let x0,x1,y0,y1;
+    if(dv.dir==="v"){ x0=dv.pos-WALL/2; x1=dv.pos+WALL/2; y0=D-b; y1=D-a; }
+    else { x0=a; x1=b; y0=D-dv.pos-WALL/2; y1=D-dv.pos+WALL/2; }
+    const sh=new THREE.Shape(); sh.moveTo(x0,y0); sh.lineTo(x1,y0); sh.lineTo(x1,y1); sh.lineTo(x0,y1); sh.closePath();
+    geos.push(extrudeUp(sh,wallH,f,D));
   }
   return geos;
 }
@@ -190,7 +198,7 @@ function makeLabel(text){
   const sc=0.3; sp.scale.set(w*sc,h*sc,1); return sp;
 }
 
-function Preview3D({coins,dividers,W,D,H,cornerR,showLid,clr,lipH}){
+function Preview3D({coins,dividers,W,D,H,cornerR,fr,showLid,clr,lipH}){
   const mount=useRef(null),st=useRef({});
   useEffect(()=>{
     const el=mount.current;
@@ -228,7 +236,7 @@ function Preview3D({coins,dividers,W,D,H,cornerR,showLid,clr,lipH}){
     const s=st.current; if(!s.grp)return;
     while(s.grp.children.length){const m=s.grp.children.pop();m.geometry&&m.geometry.dispose();
       if(m.material){m.material.map&&m.material.map.dispose();m.material.dispose();}}
-    const geos=buildGeos(W,D,H,cornerR,dividers);
+    const geos=buildGeos(W,D,H,cornerR,dividers,fr);
     const mat=new THREE.MeshStandardMaterial({color:0x9aa0a8,roughness:0.6,metalness:0.05});
     for(const g of geos) s.grp.add(new THREE.Mesh(g,mat));
     const cm=new THREE.MeshStandardMaterial({color:0xfbbf24,roughness:0.4,transparent:true,opacity:0.6});
@@ -249,7 +257,7 @@ function Preview3D({coins,dividers,W,D,H,cornerR,showLid,clr,lipH}){
       H/2+s.sph.radius*Math.cos(s.sph.phi),
       s.sph.radius*Math.sin(s.sph.phi)*Math.sin(s.sph.theta));
     s.camera.lookAt(s.target);
-  },[coins,dividers,W,D,H,cornerR,showLid,clr,lipH]);
+  },[coins,dividers,W,D,H,cornerR,fr,showLid,clr,lipH]);
   return <div ref={mount} style={{width:"100%",height:"100%"}} />;
 }
 
@@ -257,6 +265,7 @@ function App(){
   const [W,setW]=useState(150),[D,setD]=useState(100),[H,setH]=useState(50),[cornerR,setCornerR]=useState(5);
   const [grid,setGrid]=useState(5),[snap,setSnap]=useState(true);
   const [clr,setClr]=useState(0.3),[lipH,setLipH]=useState(12),[showLid,setShowLid]=useState(false);
+  const [fr,setFr]=useState(1);
   const [coins,setCoins]=useState([]);
   const [dividers,setDividers]=useState([]);
   const [selCoinIds,setSelCoinIds]=useState([]);
@@ -278,10 +287,10 @@ function App(){
 
   // 復原 / 重做
   const hist=useRef({past:[],future:[]}); const [,bump]=useState(0); const rr=()=>bump(x=>x+1);
-  const takeSnap=()=>({coins,dividers,W,D,H,cornerR,grid,order,clr,lipH});
+  const takeSnap=()=>({coins,dividers,W,D,H,cornerR,grid,order,clr,lipH,fr});
   const pushHist=()=>{ const h=hist.current; const s=takeSnap(); const last=h.past[h.past.length-1];
     if(last&&JSON.stringify(last)===JSON.stringify(s))return; h.past.push(s); if(h.past.length>80)h.past.shift(); h.future=[]; rr(); };
-  const applySnap=(s)=>{ setCoins(s.coins);setDividers(s.dividers);setW(s.W);setD(s.D);setH(s.H);setCornerR(s.cornerR);setGrid(s.grid);setOrder(s.order);setClr(s.clr);setLipH(s.lipH);setSelCoinIds([]);setSelDivId(null); };
+  const applySnap=(s)=>{ setCoins(s.coins);setDividers(s.dividers);setW(s.W);setD(s.D);setH(s.H);setCornerR(s.cornerR);setGrid(s.grid);setOrder(s.order);setClr(s.clr);setLipH(s.lipH);if(s.fr!=null)setFr(s.fr);setSelCoinIds([]);setSelDivId(null); };
   const undo=()=>{ const h=hist.current; if(!h.past.length)return; h.future.push(takeSnap()); applySnap(h.past.pop()); rr(); };
   const redo=()=>{ const h=hist.current; if(!h.future.length)return; h.past.push(takeSnap()); applySnap(h.future.pop()); rr(); };
   const snapV=(v)=> snap ? Math.round(v/grid)*grid : v;
@@ -412,10 +421,10 @@ function App(){
   const exportLid=()=>{const [lg]=buildLid(W,D,cornerR,clr,lipH,BASE);
     let s="solid lid\n"; for(const g of lg){s+=geoFacets(g);g.dispose();} s+="endsolid lid\n";
     download("lid.stl",s,"application/octet-stream");};
-  const saveJson=()=>download("box.json",JSON.stringify({W,D,H,cornerR,grid,clr,lipH,coins,dividers},null,2),"application/json");
+  const saveJson=()=>download("box.json",JSON.stringify({W,D,H,cornerR,grid,clr,lipH,fr,coins,dividers},null,2),"application/json");
   const loadJson=(e)=>{const f=e.target.files&&e.target.files[0];if(!f)return;const rd=new FileReader();
     rd.onload=()=>{try{const o=JSON.parse(rd.result);pushHist();setW(o.W);setD(o.D);setH(o.H);setCornerR(o.cornerR);if(o.grid)setGrid(o.grid);
-      if(o.clr!=null)setClr(o.clr); if(o.lipH!=null)setLipH(o.lipH);
+      if(o.clr!=null)setClr(o.clr); if(o.lipH!=null)setLipH(o.lipH); if(o.fr!=null)setFr(o.fr);
       setCoins(o.coins||[]);setDividers((o.dividers||[]).map(d=>({...d,a:d.a!=null?d.a:WALL,b:d.b!=null?d.b:((d.dir==="v"?o.D:o.W)-WALL)})));setSelCoinIds([]);setSelDivId(null);}catch{alert("無法讀取此 JSON 檔");}};
     rd.readAsText(f);};
 
@@ -568,7 +577,8 @@ function App(){
             <div className="row"><label>寬 W（≤300）</label><NumberField value={W} min={50} max={MAX_WD} onCommit={setW}/><span className="unit">mm</span></div>
             <div className="row"><label>深 D（≤300）</label><NumberField value={D} min={50} max={MAX_WD} onCommit={setD}/><span className="unit">mm</span></div>
             <div className="row"><label>高 H（≤50）</label><NumberField value={H} min={5} max={MAX_H} onCommit={setH}/><span className="unit">mm</span></div>
-            <div className="row"><label>R 角</label><NumberField value={cornerR} min={0} max={30} step={0.5} onCommit={setCornerR}/><span className="unit">mm</span></div>
+            <div className="row"><label>R 角(外框)</label><NumberField value={cornerR} min={0} max={30} step={0.5} onCommit={setCornerR}/><span className="unit">mm</span></div>
+            <div className="row"><label>內緣導角R</label><NumberField value={fr} min={0} max={1} step={0.1} onCommit={setFr}/><span className="unit">mm</span></div>
             <div className="row"><label>牆厚</label><span className="fixed">2 mm（固定）</span></div>
             <div className="row"><label>底厚</label><span className="fixed">1.5 mm（固定）</span></div>
             <div className="row"><label>格線間距</label><NumberField value={grid} min={1} max={50} step={1} onCommit={setGrid}/><span className="unit">mm</span></div>
@@ -579,7 +589,7 @@ function App(){
 
           <div className="section">
             <h2>3D 預覽</h2>
-            <div className="preview"><Preview3D coins={coins} dividers={dividers} W={W} D={D} H={H} cornerR={cornerR} showLid={showLid} clr={clr} lipH={lipH}/></div>
+            <div className="preview"><Preview3D coins={coins} dividers={dividers} W={W} D={D} H={H} cornerR={cornerR} fr={fr} showLid={showLid} clr={clr} lipH={lipH}/></div>
             <p className="sub">灰＝盒體＋隔板（匯出）　·　金＝硬幣模擬（不匯出）　·　藍＝蓋子（懸浮顯示）</p>
           </div>
 
