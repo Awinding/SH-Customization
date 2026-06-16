@@ -75,6 +75,7 @@ const { useState, useRef, useEffect, useMemo } = React;
 
 const MAX_WD=300, MAX_H=50;
 const WALL=2, BASE=1.5;
+let FLOORH=BASE; // 實際底板高度（外底圓角時會加厚），buildGeos 開頭設定
 const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
 const uid=()=>Math.random().toString(36).slice(2,9);
 
@@ -101,7 +102,7 @@ function extrudeUp(shape,wallH,f,D){
   const opt = f>0 ? {depth:Math.max(0.5,wallH-2*f),bevelEnabled:true,bevelThickness:f,bevelSize:f,bevelSegments:3,curveSegments:32}
                   : {depth:wallH,bevelEnabled:false,curveSegments:32};
   const g=new THREE.ExtrudeGeometry(shape,opt);
-  g.rotateX(-Math.PI/2); g.translate(0,BASE,D);
+  g.rotateX(-Math.PI/2); g.translate(0,FLOORH,D);
   return g;
 }
 /* 牆腳凹圓角：沿一條牆腳補一條圓角料 */
@@ -112,7 +113,7 @@ function coveSeg(r,length,fx,fz,inx,inz,rx,rz){
   sh.closePath();
   const g=new THREE.ExtrudeGeometry(sh,{depth:length,bevelEnabled:false,curveSegments:1});
   const e1=new THREE.Vector3(inx,0,inz), e2=new THREE.Vector3(0,1,0), e3=new THREE.Vector3(rx,0,rz);
-  g.applyMatrix4(new THREE.Matrix4().makeBasis(e1,e2,e3)); g.translate(fx,BASE,fz);
+  g.applyMatrix4(new THREE.Matrix4().makeBasis(e1,e2,e3)); g.translate(fx,FLOORH,fz);
   return g;
 }
 /* 垂直內圓角：在隔板接牆的轉角補整段高度的圓角 */
@@ -123,14 +124,34 @@ function vCorner(R,height,cx,cz,i1x,i1z,i2x,i2z){
   sh.closePath();
   const g=new THREE.ExtrudeGeometry(sh,{depth:height,bevelEnabled:false,curveSegments:1});
   const e1=new THREE.Vector3(i1x,0,i1z), e2=new THREE.Vector3(i2x,0,i2z), e3=new THREE.Vector3(0,1,0);
-  g.applyMatrix4(new THREE.Matrix4().makeBasis(e1,e2,e3)); g.translate(cx,BASE,cz);
+  g.applyMatrix4(new THREE.Matrix4().makeBasis(e1,e2,e3)); g.translate(cx,FLOORH,cz);
   return g;
 }
-function buildGeos(W,D,H,cornerR,dividers,fr,coveR){
+/* 外底圓角腳座：實心，外底稜線倒成 R，頂面平（牆坐其上） */
+function buildFoot(W,D,cornerR,obr,floorH){
+  const seg2=8, rings=[];
+  for(let k=0;k<=seg2;k++){ const th=(k/seg2)*(Math.PI/2); rings.push({y:obr*(1-Math.cos(th)), inset:obr*(1-Math.sin(th))}); }
+  if(floorH>obr+1e-4) rings.push({y:floorH, inset:0});
+  const ringPts=rings.map(r=>roundRectPts(W/2,D/2,Math.max(1,W-2*r.inset),Math.max(1,D-2*r.inset),Math.max(0,cornerR-r.inset)));
+  const n=ringPts[0].length, verts=[], faces=[];
+  for(let r=0;r<rings.length;r++){ const y=rings[r].y, pr=ringPts[r]; for(let i=0;i<n;i++) verts.push(pr[i][0],y,pr[i][1]); }
+  for(let r=0;r<rings.length-1;r++){ const b0=r*n,b1=(r+1)*n; for(let i=0;i<n;i++){ const j=(i+1)%n; faces.push(b0+i,b0+j,b1+j, b0+i,b1+j,b1+i); } }
+  const cBot=verts.length/3; verts.push(W/2,0,D/2);
+  for(let i=0;i<n;i++){ const j=(i+1)%n; faces.push(cBot,i,j); }
+  const last=rings.length-1, base=last*n, cTop=verts.length/3; verts.push(W/2,rings[last].y,D/2);
+  for(let i=0;i<n;i++){ const j=(i+1)%n; faces.push(cTop,base+j,base+i); }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute(verts,3)); g.setIndex(faces); g.computeVertexNormals();
+  return g;
+}
+function buildGeos(W,D,H,cornerR,dividers,fr,coveR,obr){
   const geos=[];
-  const wallH=Math.max(0.5,H-BASE);
+  obr=Math.max(0, Math.min(obr||0, (Math.min(W,D)/2-WALL-1), H-2));
+  const floorH=Math.max(BASE, obr); FLOORH=floorH;
+  const wallH=Math.max(0.5,H-floorH);
   const f=Math.max(0, Math.min(fr||0, WALL/2-0.05, wallH/2-0.3));
-  const baseGeo=new THREE.BoxGeometry(W,BASE,D); baseGeo.translate(W/2,BASE/2,D/2); geos.push(baseGeo);
+  if(obr>0.05) geos.push(buildFoot(W,D,cornerR,obr,floorH));
+  else { const baseGeo=new THREE.BoxGeometry(W,floorH,D); baseGeo.translate(W/2,floorH/2,D/2); geos.push(baseGeo); }
   const outer=roundRectPts(W/2,D/2,W,D,cornerR);
   const shape=new THREE.Shape(); shape.moveTo(outer[0][0],outer[0][1]);
   for(let i=1;i<outer.length;i++) shape.lineTo(outer[i][0],outer[i][1]); shape.closePath();
@@ -151,11 +172,17 @@ function buildGeos(W,D,H,cornerR,dividers,fr,coveR){
   // 底部凹圓角
   const cr=Math.max(0,Math.min(coveR||0, wallH-1));
   if(cr>0){
-    const Lz=Math.max(0,D-2*WALL), Lx=Math.max(0,W-2*WALL); const push=g=>{if(g)geos.push(g);};
-    push(coveSeg(cr,Lz,WALL,WALL,1,0,0,1));
-    push(coveSeg(cr,Lz,W-WALL,WALL,-1,0,0,1));
-    push(coveSeg(cr,Lx,WALL,WALL,0,1,1,0));
-    push(coveSeg(cr,Lx,WALL,D-WALL,0,-1,1,0));
+    const push=g=>{if(g)geos.push(g);};
+    // 沿整圈內緣連續補圓角（含四個圓角轉角）
+    const ring=roundRectPts(W/2,D/2,iw,ih,ir);
+    for(let i=0;i<ring.length;i++){
+      const p0=ring[i], p1=ring[(i+1)%ring.length];
+      const dx=p1[0]-p0[0], dz=p1[1]-p0[1]; const L=Math.hypot(dx,dz); if(L<1e-3) continue;
+      const rx=dx/L, rz=dz/L;
+      let ix=W/2-(p0[0]+p1[0])/2, iz=D/2-(p0[1]+p1[1])/2; let il=Math.hypot(ix,iz)||1; ix/=il; iz/=il;
+      const dot=ix*rx+iz*rz; ix-=dot*rx; iz-=dot*rz; il=Math.hypot(ix,iz)||1; ix/=il; iz/=il;
+      push(coveSeg(cr,L,p0[0],p0[1],ix,iz,rx,rz));
+    }
     for(const dv of dividers){
       const a=dv.a!=null?dv.a:WALL, b=dv.b!=null?dv.b:((dv.dir==="v"?D:W)-WALL); const len=Math.max(0,b-a);
       if(dv.dir==="v"){ push(coveSeg(cr,len,dv.pos-WALL/2,a,-1,0,0,1)); push(coveSeg(cr,len,dv.pos+WALL/2,a,1,0,0,1)); }
@@ -164,7 +191,7 @@ function buildGeos(W,D,H,cornerR,dividers,fr,coveR){
   }
   // 隔板平面轉角的垂直內圓角 + 端點圓頭
   const vr=Math.max(0,coveR||0); const tol=0.8;
-  const endCap=(cx,cz)=>{const g=new THREE.CylinderGeometry(WALL/2,WALL/2,wallH,16); g.translate(cx,BASE+wallH/2,cz); return g;};
+  const endCap=(cx,cz)=>{const g=new THREE.CylinderGeometry(WALL/2,WALL/2,wallH,16); g.translate(cx,FLOORH+wallH/2,cz); return g;};
   if(dividers.length){ const push=g=>{if(g)geos.push(g);};
     for(const dv of dividers){
       const a=dv.a!=null?dv.a:WALL, b=dv.b!=null?dv.b:((dv.dir==="v"?D:W)-WALL);
@@ -253,7 +280,7 @@ function makeLabel(text){
   const sc=0.3; sp.scale.set(w*sc,h*sc,1); return sp;
 }
 
-function Preview3D({coins,dividers,W,D,H,cornerR,fr,coveR,showLid,clr,lipH}){
+function Preview3D({coins,dividers,W,D,H,cornerR,fr,coveR,obr,showLid,clr,lipH}){
   const mount=useRef(null),st=useRef({});
   useEffect(()=>{
     const el=mount.current;
@@ -291,7 +318,7 @@ function Preview3D({coins,dividers,W,D,H,cornerR,fr,coveR,showLid,clr,lipH}){
     const s=st.current; if(!s.grp)return;
     while(s.grp.children.length){const m=s.grp.children.pop();m.geometry&&m.geometry.dispose();
       if(m.material){m.material.map&&m.material.map.dispose();m.material.dispose();}}
-    const geos=buildGeos(W,D,H,cornerR,dividers,fr,coveR);
+    const geos=buildGeos(W,D,H,cornerR,dividers,fr,coveR,obr);
     const mat=new THREE.MeshStandardMaterial({color:0x9aa0a8,roughness:0.6,metalness:0.05,side:THREE.DoubleSide});
     for(const g of geos) s.grp.add(new THREE.Mesh(g,mat));
     const cm=new THREE.MeshStandardMaterial({color:0xfbbf24,roughness:0.4,transparent:true,opacity:0.6});
@@ -299,7 +326,7 @@ function Preview3D({coins,dividers,W,D,H,cornerR,fr,coveR,showLid,clr,lipH}){
     for(const co of coins){ let g;
       if(co.kind==="circle") g=new THREE.CylinderGeometry(co.d/2,co.d/2,th,40);
       else g=new THREE.BoxGeometry(co.w,th,co.h);
-      const m=new THREE.Mesh(g,cm); m.position.set(co.cx,BASE+th/2+0.4,co.cy); s.grp.add(m);
+      const m=new THREE.Mesh(g,cm); m.position.set(co.cx,FLOORH+th/2+0.4,co.cy); s.grp.add(m);
     }
     if(showLid){ const [lg]=buildLid(W,D,cornerR,clr,lipH,BASE);
       const lm=new THREE.MeshStandardMaterial({color:0x60a5fa,roughness:0.5,metalness:0.05,transparent:true,opacity:0.55});
@@ -312,7 +339,7 @@ function Preview3D({coins,dividers,W,D,H,cornerR,fr,coveR,showLid,clr,lipH}){
       H/2+s.sph.radius*Math.cos(s.sph.phi),
       s.sph.radius*Math.sin(s.sph.phi)*Math.sin(s.sph.theta));
     s.camera.lookAt(s.target);
-  },[coins,dividers,W,D,H,cornerR,fr,coveR,showLid,clr,lipH]);
+  },[coins,dividers,W,D,H,cornerR,fr,coveR,obr,showLid,clr,lipH]);
   return <div ref={mount} style={{width:"100%",height:"100%"}} />;
 }
 
@@ -322,6 +349,7 @@ function App(){
   const [clr,setClr]=useState(0.3),[lipH,setLipH]=useState(12),[showLid,setShowLid]=useState(false);
   const [fr,setFr]=useState(1);
   const [coveR,setCoveR]=useState(3);
+  const [obr,setObr]=useState(2);
   const [coins,setCoins]=useState([]);
   const [dividers,setDividers]=useState([]);
   const [selCoinIds,setSelCoinIds]=useState([]);
@@ -343,10 +371,10 @@ function App(){
 
   // 復原 / 重做
   const hist=useRef({past:[],future:[]}); const [,bump]=useState(0); const rr=()=>bump(x=>x+1);
-  const takeSnap=()=>({coins,dividers,W,D,H,cornerR,grid,order,clr,lipH,fr,coveR});
+  const takeSnap=()=>({coins,dividers,W,D,H,cornerR,grid,order,clr,lipH,fr,coveR,obr});
   const pushHist=()=>{ const h=hist.current; const s=takeSnap(); const last=h.past[h.past.length-1];
     if(last&&JSON.stringify(last)===JSON.stringify(s))return; h.past.push(s); if(h.past.length>80)h.past.shift(); h.future=[]; rr(); };
-  const applySnap=(s)=>{ setCoins(s.coins);setDividers(s.dividers);setW(s.W);setD(s.D);setH(s.H);setCornerR(s.cornerR);setGrid(s.grid);setOrder(s.order);setClr(s.clr);setLipH(s.lipH);if(s.fr!=null)setFr(s.fr);if(s.coveR!=null)setCoveR(s.coveR);setSelCoinIds([]);setSelDivId(null); };
+  const applySnap=(s)=>{ setCoins(s.coins);setDividers(s.dividers);setW(s.W);setD(s.D);setH(s.H);setCornerR(s.cornerR);setGrid(s.grid);setOrder(s.order);setClr(s.clr);setLipH(s.lipH);if(s.fr!=null)setFr(s.fr);if(s.coveR!=null)setCoveR(s.coveR);if(s.obr!=null)setObr(s.obr);setSelCoinIds([]);setSelDivId(null); };
   const undo=()=>{ const h=hist.current; if(!h.past.length)return; h.future.push(takeSnap()); applySnap(h.past.pop()); rr(); };
   const redo=()=>{ const h=hist.current; if(!h.future.length)return; h.past.push(takeSnap()); applySnap(h.future.pop()); rr(); };
   const snapV=(v)=> snap ? Math.round(v/grid)*grid : v;
@@ -471,16 +499,16 @@ function App(){
       return {...d,pos:d.pos+dp, a:(d.a!=null?d.a+dab:d.a), b:(d.b!=null?d.b+dab:d.b)};})); setW(nW); setD(nD);
   };
 
-  const exportStl=()=>{const geos=buildGeos(W,D,H,cornerR,dividers);
+  const exportStl=()=>{const geos=buildGeos(W,D,H,cornerR,dividers,fr,coveR,obr);
     let s="solid box\n"; for(const g of geos){s+=geoFacets(g);g.dispose();} s+="endsolid box\n";
     download("box.stl",s,"application/octet-stream");};
   const exportLid=()=>{const [lg]=buildLid(W,D,cornerR,clr,lipH,BASE);
     let s="solid lid\n"; for(const g of lg){s+=geoFacets(g);g.dispose();} s+="endsolid lid\n";
     download("lid.stl",s,"application/octet-stream");};
-  const saveJson=()=>download("box.json",JSON.stringify({W,D,H,cornerR,grid,clr,lipH,fr,coveR,coins,dividers},null,2),"application/json");
+  const saveJson=()=>download("box.json",JSON.stringify({W,D,H,cornerR,grid,clr,lipH,fr,coveR,obr,coins,dividers},null,2),"application/json");
   const loadJson=(e)=>{const f=e.target.files&&e.target.files[0];if(!f)return;const rd=new FileReader();
     rd.onload=()=>{try{const o=JSON.parse(rd.result);pushHist();setW(o.W);setD(o.D);setH(o.H);setCornerR(o.cornerR);if(o.grid)setGrid(o.grid);
-      if(o.clr!=null)setClr(o.clr); if(o.lipH!=null)setLipH(o.lipH); if(o.fr!=null)setFr(o.fr); if(o.coveR!=null)setCoveR(o.coveR);
+      if(o.clr!=null)setClr(o.clr); if(o.lipH!=null)setLipH(o.lipH); if(o.fr!=null)setFr(o.fr); if(o.coveR!=null)setCoveR(o.coveR); if(o.obr!=null)setObr(o.obr);
       setCoins(o.coins||[]);setDividers((o.dividers||[]).map(d=>({...d,a:d.a!=null?d.a:WALL,b:d.b!=null?d.b:((d.dir==="v"?o.D:o.W)-WALL)})));setSelCoinIds([]);setSelDivId(null);}catch{alert("無法讀取此 JSON 檔");}};
     rd.readAsText(f);};
 
@@ -635,7 +663,8 @@ function App(){
             <div className="row"><label>高 H（≤50）</label><NumberField value={H} min={5} max={MAX_H} onCommit={setH}/><span className="unit">mm</span></div>
             <div className="row"><label>R 角(外框)</label><NumberField value={cornerR} min={0} max={30} step={0.5} onCommit={setCornerR}/><span className="unit">mm</span></div>
             <div className="row"><label>頂緣導角(≤1)</label><NumberField value={fr} min={0} max={1} step={0.1} onCommit={setFr}/><span className="unit">mm</span></div>
-            <div className="row"><label>內圓角R</label><NumberField value={coveR} min={0} max={8} step={0.5} onCommit={setCoveR}/><span className="unit">mm</span></div>
+            <div className="row"><label>內圓角R</label><NumberField value={coveR} min={0} max={20} step={0.5} onCommit={setCoveR}/><span className="unit">mm</span></div>
+            <div className="row"><label>外底圓角R</label><NumberField value={obr} min={0} max={20} step={0.5} onCommit={setObr}/><span className="unit">mm</span></div>
             <div className="row"><label>牆厚</label><span className="fixed">2 mm（固定）</span></div>
             <div className="row"><label>底厚</label><span className="fixed">1.5 mm（固定）</span></div>
             <div className="row"><label>格線間距</label><NumberField value={grid} min={1} max={50} step={1} onCommit={setGrid}/><span className="unit">mm</span></div>
@@ -646,7 +675,7 @@ function App(){
 
           <div className="section">
             <h2>3D 預覽</h2>
-            <div className="preview"><Preview3D coins={coins} dividers={dividers} W={W} D={D} H={H} cornerR={cornerR} fr={fr} coveR={coveR} showLid={showLid} clr={clr} lipH={lipH}/></div>
+            <div className="preview"><Preview3D coins={coins} dividers={dividers} W={W} D={D} H={H} cornerR={cornerR} fr={fr} coveR={coveR} obr={obr} showLid={showLid} clr={clr} lipH={lipH}/></div>
             <p className="sub">灰＝盒體＋隔板（匯出）　·　金＝硬幣模擬（不匯出）　·　藍＝蓋子（懸浮顯示）</p>
           </div>
 
