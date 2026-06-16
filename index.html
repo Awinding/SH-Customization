@@ -115,6 +115,17 @@ function coveSeg(r,length,fx,fz,inx,inz,rx,rz){
   g.applyMatrix4(new THREE.Matrix4().makeBasis(e1,e2,e3)); g.translate(fx,BASE,fz);
   return g;
 }
+/* 垂直內圓角：在隔板接牆的轉角補整段高度的圓角 */
+function vCorner(R,height,cx,cz,i1x,i1z,i2x,i2z){
+  if(R<=0||height<=0) return null;
+  const sh=new THREE.Shape(); sh.moveTo(0,0); sh.lineTo(R,0);
+  const seg=8; for(let i=1;i<=seg;i++){const a=-Math.PI/2-(Math.PI/2)*(i/seg); sh.lineTo(R+R*Math.cos(a),R+R*Math.sin(a));}
+  sh.closePath();
+  const g=new THREE.ExtrudeGeometry(sh,{depth:height,bevelEnabled:false,curveSegments:1});
+  const e1=new THREE.Vector3(i1x,0,i1z), e2=new THREE.Vector3(i2x,0,i2z), e3=new THREE.Vector3(0,1,0);
+  g.applyMatrix4(new THREE.Matrix4().makeBasis(e1,e2,e3)); g.translate(cx,BASE,cz);
+  return g;
+}
 function buildGeos(W,D,H,cornerR,dividers,fr,coveR){
   const geos=[];
   const wallH=Math.max(0.5,H-BASE);
@@ -149,6 +160,25 @@ function buildGeos(W,D,H,cornerR,dividers,fr,coveR){
       const a=dv.a!=null?dv.a:WALL, b=dv.b!=null?dv.b:((dv.dir==="v"?D:W)-WALL); const len=Math.max(0,b-a);
       if(dv.dir==="v"){ push(coveSeg(cr,len,dv.pos-WALL/2,a,-1,0,0,1)); push(coveSeg(cr,len,dv.pos+WALL/2,a,1,0,0,1)); }
       else { push(coveSeg(cr,len,a,dv.pos-WALL/2,0,-1,1,0)); push(coveSeg(cr,len,a,dv.pos+WALL/2,0,1,1,0)); }
+    }
+  }
+  // 隔板平面轉角的垂直內圓角 + 端點圓頭
+  const vr=Math.max(0,coveR||0); const tol=0.8;
+  const endCap=(cx,cz)=>{const g=new THREE.CylinderGeometry(WALL/2,WALL/2,wallH,16); g.translate(cx,BASE+wallH/2,cz); return g;};
+  if(dividers.length){ const push=g=>{if(g)geos.push(g);};
+    for(const dv of dividers){
+      const a=dv.a!=null?dv.a:WALL, b=dv.b!=null?dv.b:((dv.dir==="v"?D:W)-WALL);
+      if(dv.dir==="v"){
+        if(vr>0 && Math.abs(a-WALL)<tol){ push(vCorner(vr,wallH,dv.pos-WALL/2,WALL,-1,0,0,1)); push(vCorner(vr,wallH,dv.pos+WALL/2,WALL,1,0,0,1)); }
+        else if(a>WALL+tol){ push(endCap(dv.pos,a)); }
+        if(vr>0 && Math.abs(b-(D-WALL))<tol){ push(vCorner(vr,wallH,dv.pos-WALL/2,D-WALL,-1,0,0,-1)); push(vCorner(vr,wallH,dv.pos+WALL/2,D-WALL,1,0,0,-1)); }
+        else if(b<D-WALL-tol){ push(endCap(dv.pos,b)); }
+      } else {
+        if(vr>0 && Math.abs(a-WALL)<tol){ push(vCorner(vr,wallH,WALL,dv.pos-WALL/2,1,0,0,-1)); push(vCorner(vr,wallH,WALL,dv.pos+WALL/2,1,0,0,1)); }
+        else if(a>WALL+tol){ push(endCap(a,dv.pos)); }
+        if(vr>0 && Math.abs(b-(W-WALL))<tol){ push(vCorner(vr,wallH,W-WALL,dv.pos-WALL/2,-1,0,0,-1)); push(vCorner(vr,wallH,W-WALL,dv.pos+WALL/2,-1,0,0,1)); }
+        else if(b<W-WALL-tol){ push(endCap(b,dv.pos)); }
+      }
     }
   }
   return geos;
@@ -605,7 +635,7 @@ function App(){
             <div className="row"><label>高 H（≤50）</label><NumberField value={H} min={5} max={MAX_H} onCommit={setH}/><span className="unit">mm</span></div>
             <div className="row"><label>R 角(外框)</label><NumberField value={cornerR} min={0} max={30} step={0.5} onCommit={setCornerR}/><span className="unit">mm</span></div>
             <div className="row"><label>頂緣導角(≤1)</label><NumberField value={fr} min={0} max={1} step={0.1} onCommit={setFr}/><span className="unit">mm</span></div>
-            <div className="row"><label>底部圓角R</label><NumberField value={coveR} min={0} max={8} step={0.5} onCommit={setCoveR}/><span className="unit">mm</span></div>
+            <div className="row"><label>內圓角R</label><NumberField value={coveR} min={0} max={8} step={0.5} onCommit={setCoveR}/><span className="unit">mm</span></div>
             <div className="row"><label>牆厚</label><span className="fixed">2 mm（固定）</span></div>
             <div className="row"><label>底厚</label><span className="fixed">1.5 mm（固定）</span></div>
             <div className="row"><label>格線間距</label><NumberField value={grid} min={1} max={50} step={1} onCommit={setGrid}/><span className="unit">mm</span></div>
