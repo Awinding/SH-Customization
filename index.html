@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>陳列盒編輯器</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root{
+    --bg:#0f172a; --bg2:#1e293b; --bg3:#0b1120; --line:#334155; --line2:#475569;
+    --txt:#e2e8f0; --mut:#94a3b8; --mut2:#64748b; --accent:#f59e0b; --danger:#f87171; --ok:#34d399;
+  }
+  body{ background:var(--bg); color:var(--txt);
+    font-family:-apple-system,"Noto Sans TC","Microsoft JhengHei",sans-serif; -webkit-font-smoothing:antialiased; }
+  .wrap{ max-width:1240px; margin:0 auto; padding:16px; }
+  .card{ background:var(--bg); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  .topbar{ display:flex; align-items:center; justify-content:space-between; padding:12px 18px;
+    border-bottom:1px solid var(--bg2); flex-wrap:wrap; gap:10px; }
+  .brand{ display:flex; align-items:center; gap:8px; font-weight:600; font-size:15px; }
+  .dot{ width:14px; height:14px; border-radius:3px; background:var(--accent); }
+  .count{ font-size:12px; color:var(--mut2); font-family:ui-monospace,monospace; }
+  .actions{ display:flex; gap:8px; flex-wrap:wrap; }
+  .btn{ display:inline-flex; align-items:center; gap:6px; cursor:pointer; border:none; border-radius:6px;
+    padding:8px 12px; font-size:12px; font-weight:500; background:var(--line); color:var(--txt); transition:.15s; font-family:inherit; }
+  .btn:hover{ filter:brightness(1.15); }
+  .btn:disabled{ opacity:.35; cursor:not-allowed; }
+  .btn.accent{ background:var(--accent); color:#0f172a; }
+  .btn.ghost{ background:var(--bg2); color:var(--mut); border:1px solid var(--line); }
+  .btn.danger{ background:var(--bg2); color:var(--danger); border:1px solid #7f1d1d; }
+  .btn.sm{ padding:6px 11px; }
+  .toolrow{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+  .toollbl{ font-size:11px; color:var(--mut2); width:58px; }
+  .chip{ cursor:pointer; border:1px solid var(--line); background:var(--bg2); color:var(--txt);
+    border-radius:20px; padding:6px 13px; font-size:13px; font-weight:600; display:flex; align-items:center; gap:7px; }
+  .chip:hover{ border-color:var(--accent); }
+  .chip .mark{ width:13px; height:13px; background:var(--mut); display:inline-block; }
+  .chip .mark.circle{ border-radius:50%; }
+  .chip .mark.rect{ border-radius:2px; width:17px; height:10px; }
+  .main{ display:flex; flex-wrap:wrap; }
+  .editor{ flex:1 1 480px; padding:18px; min-width:0; }
+  .hint{ font-size:12px; color:var(--mut2); margin-bottom:12px; line-height:1.6; }
+  .svgwrap{ width:100%; background:var(--bg3); border:1px solid var(--bg2); border-radius:10px;
+    touch-action:none; user-select:none; display:block; }
+  .panel{ flex:0 0 300px; border-left:1px solid var(--bg2); padding:18px; }
+  @media (max-width:860px){ .panel{ border-left:none; border-top:1px solid var(--bg2); flex-basis:100%; } }
+  .section{ margin-bottom:22px; }
+  .section h2{ font-size:11px; font-weight:600; color:var(--mut); text-transform:uppercase; letter-spacing:.08em; margin-bottom:10px; }
+  .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .row{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
+  .row label{ font-size:12px; color:var(--mut); }
+  .fixed{ font-size:12px; color:var(--mut2); font-family:ui-monospace,monospace; }
+  input[type=number],input[type=text]{ background:var(--bg3); border:1px solid var(--line); border-radius:5px; color:var(--txt); padding:6px 8px; font-size:13px; }
+  input[type=number]{ width:80px; text-align:right; font-family:ui-monospace,monospace; }
+  input[type=text]{ width:100%; font-family:inherit; }
+  input:focus{ outline:none; border-color:var(--accent); }
+  .unit{ width:24px; font-size:11px; color:var(--mut2); }
+  .preview{ height:230px; border:1px solid var(--bg2); border-radius:10px; overflow:hidden; }
+  .sub{ font-size:10px; color:var(--mut2); margin-top:6px; }
+  .warn{ font-size:11px; color:var(--danger); margin-top:6px; }
+  .okmsg{ font-size:11px; color:var(--ok); }
+  .toggle{ display:flex; align-items:center; gap:8px; font-size:12px; color:var(--mut); cursor:pointer; }
+  svg text{ font-family:-apple-system,"Noto Sans TC",sans-serif; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.10/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<script type="text/babel">
+const { useState, useRef, useEffect, useMemo } = React;
+
+const MAX_WD=300, MAX_H=50;
+const WALL=2, BASE=1.5;
+const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
+const uid=()=>Math.random().toString(36).slice(2,9);
+
+const COINS=[
+  { key:"c1",  label:"1元",  kind:"rect",   w:74, h:29 },
+  { key:"c5",  label:"5元",  kind:"circle", d:31.1 },
+  { key:"c10", label:"10元", kind:"circle", d:35.1 },
+  { key:"c50", label:"50元", kind:"circle", d:37.1 },
+  { key:"cc",  label:"自訂圓",kind:"circle", d:30, custom:true },
+];
+const halfExtent=(s)=> s.kind==="circle" ? [s.d/2,s.d/2] : [s.w/2,s.h/2];
+const keyOf=(c)=> c.kind==="circle" ? ("c"+c.d) : ("r"+c.w+"x"+c.h);
+
+function roundRectPts(cx,cy,w,h,r){
+  r=Math.max(0,Math.min(r,w/2,h/2));
+  const x0=cx-w/2,y0=cy-h/2,x1=cx+w/2,y1=cy+h/2,seg=6,pts=[];
+  const corner=(a,b,s,e)=>{for(let i=0;i<=seg;i++){const t=s+(e-s)*i/seg;pts.push([a+Math.cos(t)*r,b+Math.sin(t)*r]);}};
+  corner(x1-r,y0+r,-Math.PI/2,0); corner(x1-r,y1-r,0,Math.PI/2);
+  corner(x0+r,y1-r,Math.PI/2,Math.PI); corner(x0+r,y0+r,Math.PI,Math.PI*1.5);
+  return pts;
+}
+
+function buildGeos(W,D,H,cornerR,dividers){
+  const geos=[];
+  const baseGeo=new THREE.BoxGeometry(W,BASE,D); baseGeo.translate(W/2,BASE/2,D/2); geos.push(baseGeo);
+  const outer=roundRectPts(W/2,D/2,W,D,cornerR);
+  const shape=new THREE.Shape(); shape.moveTo(outer[0][0],outer[0][1]);
+  for(let i=1;i<outer.length;i++) shape.lineTo(outer[i][0],outer[i][1]); shape.closePath();
+  const iw=Math.max(1,W-2*WALL), ih=Math.max(1,D-2*WALL), ir=Math.max(0,cornerR-WALL);
+  const inn=roundRectPts(W/2,D/2,iw,ih,ir).reverse();
+  const hole=new THREE.Path(); hole.moveTo(inn[0][0],inn[0][1]);
+  for(let i=1;i<inn.length;i++) hole.lineTo(inn[i][0],inn[i][1]); hole.closePath();
+  shape.holes.push(hole);
+  const wallH=Math.max(0.5,H-BASE);
+  const walls=new THREE.ExtrudeGeometry(shape,{depth:wallH,bevelEnabled:false,curveSegments:48});
+  walls.rotateX(-Math.PI/2); walls.translate(0,BASE,D); geos.push(walls);
+  for(const dv of dividers){ let g;
+    if(dv.dir==="v"){ const a=dv.a!=null?dv.a:WALL,b=dv.b!=null?dv.b:(D-WALL); const len=Math.max(0.5,b-a);
+      g=new THREE.BoxGeometry(WALL,wallH,len); g.translate(dv.pos,BASE+wallH/2,(a+b)/2); }
+    else { const a=dv.a!=null?dv.a:WALL,b=dv.b!=null?dv.b:(W-WALL); const len=Math.max(0.5,b-a);
+      g=new THREE.BoxGeometry(len,wallH,WALL); g.translate((a+b)/2,BASE+wallH/2,dv.pos); }
+    geos.push(g);
+  }
+  return geos;
+}
+
+/* ---------- 蓋子（天地蓋，套在盒外、留公差）---------- */
+function buildLid(W,D,cornerR,clr,lipH,topT){
+  const Wl=W+2*(clr+WALL), Dl=D+2*(clr+WALL);
+  const Ro=cornerR+WALL+clr, Ri=cornerR+clr;
+  const geos=[];
+  const top=new THREE.BoxGeometry(Wl,topT,Dl); top.translate(0,lipH+topT/2,0); geos.push(top);
+  const outer=roundRectPts(0,0,Wl,Dl,Ro);
+  const shape=new THREE.Shape(); shape.moveTo(outer[0][0],outer[0][1]);
+  for(let i=1;i<outer.length;i++) shape.lineTo(outer[i][0],outer[i][1]); shape.closePath();
+  const inn=roundRectPts(0,0,W+2*clr,D+2*clr,Ri).reverse();
+  const hole=new THREE.Path(); hole.moveTo(inn[0][0],inn[0][1]);
+  for(let i=1;i<inn.length;i++) hole.lineTo(inn[i][0],inn[i][1]); hole.closePath();
+  shape.holes.push(hole);
+  const sk=new THREE.ExtrudeGeometry(shape,{depth:lipH,bevelEnabled:false,curveSegments:48});
+  sk.rotateX(-Math.PI/2); geos.push(sk);
+  return [geos,Wl,Dl];
+}
+
+function geoFacets(geo){
+  const pos=geo.attributes.position, idx=geo.index;
+  const get=i=>[pos.getX(i),pos.getY(i),pos.getZ(i)]; let s="";
+  const emit=(a,b,c)=>{const u=[b[0]-a[0],b[1]-a[1],b[2]-a[2]],v=[c[0]-a[0],c[1]-a[1],c[2]-a[2]];
+    let n=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]];
+    const L=Math.hypot(n[0],n[1],n[2])||1; n=[n[0]/L,n[1]/L,n[2]/L];
+    s+=`facet normal ${n[0]} ${n[1]} ${n[2]}\nouter loop\nvertex ${a[0]} ${a[1]} ${a[2]}\nvertex ${b[0]} ${b[1]} ${b[2]}\nvertex ${c[0]} ${c[1]} ${c[2]}\nendloop\nendfacet\n`;};
+  if(idx) for(let i=0;i<idx.count;i+=3) emit(get(idx.getX(i)),get(idx.getX(i+1)),get(idx.getX(i+2)));
+  else    for(let i=0;i<pos.count;i+=3) emit(get(i),get(i+1),get(i+2));
+  return s;
+}
+function download(name,text,mime){const b=new Blob([text],{type:mime});const u=URL.createObjectURL(b);
+  const a=document.createElement("a");a.href=u;a.download=name;a.click();URL.revokeObjectURL(u);}
+
+function coinFits(c,W,D){ const [hw,hh]=halfExtent(c);
+  return c.cx-hw>=WALL && c.cx+hw<=W-WALL && c.cy-hh>=WALL && c.cy+hh<=D-WALL; }
+
+/* 把硬幣依 X 中心分群成「直欄」 */
+function clusterColumns(coins){
+  const cols=[];
+  for(const c of [...coins].sort((a,b)=>a.cx-b.cx)){
+    const [hw,hh]=halfExtent(c);
+    let col=cols.find(k=>Math.abs(k.cx-c.cx)<3);
+    if(!col){col={cx:c.cx,left:c.cx-hw,right:c.cx+hw,top:c.cy-hh,bottom:c.cy+hh,ids:[c.id],_sx:c.cx,_n:1};cols.push(col);}
+    else{col.left=Math.min(col.left,c.cx-hw);col.right=Math.max(col.right,c.cx+hw);col.top=Math.min(col.top,c.cy-hh);col.bottom=Math.max(col.bottom,c.cy+hh);col.ids.push(c.id);col._sx+=c.cx;col._n++;col.cx=col._sx/col._n;}
+  }
+  cols.sort((a,b)=>a.cx-b.cx); return cols;
+}
+
+function NumberField({value,onCommit,min,max,step=1}){
+  const [txt,setTxt]=useState(String(value));
+  useEffect(()=>{setTxt(String(value));},[value]);
+  const change=e=>{const v=e.target.value; if(v===""){setTxt("");return;} const n=Number(v); if(isNaN(n))return;
+    if(max!=null&&n>max){setTxt(String(max));onCommit(max);} else {setTxt(v);onCommit(n);} };
+  const blur=()=>{ if(txt===""||isNaN(Number(txt))){setTxt(String(value));return;}
+    let n=Number(txt); if(min!=null)n=Math.max(min,n); if(max!=null)n=Math.min(max,n); onCommit(n); setTxt(String(n)); };
+  return <input type="number" value={txt} step={step} onChange={change} onBlur={blur} />;
+}
+
+function makeLabel(text){
+  const c=document.createElement("canvas"),ctx=c.getContext("2d"),fs=52;
+  ctx.font=`bold ${fs}px sans-serif`; const w=Math.ceil(ctx.measureText(text).width)+44,h=fs+30,r=18;
+  c.width=w;c.height=h; ctx.font=`bold ${fs}px sans-serif`;
+  ctx.fillStyle="rgba(245,158,11,0.95)"; ctx.beginPath();
+  ctx.moveTo(r,0);ctx.arcTo(w,0,w,h,r);ctx.arcTo(w,h,0,h,r);ctx.arcTo(0,h,0,0,r);ctx.arcTo(0,0,w,0,r);ctx.closePath();ctx.fill();
+  ctx.fillStyle="#0f172a";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(text,w/2,h/2+2);
+  const tex=new THREE.CanvasTexture(c);
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthTest:false}));
+  const sc=0.3; sp.scale.set(w*sc,h*sc,1); return sp;
+}
+
+function Preview3D({coins,dividers,W,D,H,cornerR,showLid,clr,lipH}){
+  const mount=useRef(null),st=useRef({});
+  useEffect(()=>{
+    const el=mount.current;
+    const scene=new THREE.Scene(); scene.background=new THREE.Color(0x0f172a);
+    const camera=new THREE.PerspectiveCamera(45,1,1,6000);
+    const renderer=new THREE.WebGLRenderer({antialias:true}); renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+    el.appendChild(renderer.domElement);
+    const grp=new THREE.Group(); scene.add(grp);
+    scene.add(new THREE.AmbientLight(0xffffff,0.55));
+    const l1=new THREE.DirectionalLight(0xffffff,0.9);l1.position.set(1,2,1.5);scene.add(l1);
+    const l2=new THREE.DirectionalLight(0xffffff,0.35);l2.position.set(-1,1,-1);scene.add(l2);
+    const sph={theta:-0.9,phi:0.85,radius:600},target=new THREE.Vector3();
+    st.current={scene,camera,renderer,grp,sph,target};
+    const place=()=>{camera.position.set(
+      target.x+sph.radius*Math.sin(sph.phi)*Math.cos(sph.theta),
+      target.y+sph.radius*Math.cos(sph.phi),
+      target.z+sph.radius*Math.sin(sph.phi)*Math.sin(sph.theta)); camera.lookAt(target);};
+    let drag=false,lx=0,ly=0; const dom=renderer.domElement; dom.style.cursor="grab";
+    const dn=e=>{drag=true;lx=e.clientX;ly=e.clientY;dom.style.cursor="grabbing";};
+    const mv=e=>{if(!drag)return; sph.theta+=(e.clientX-lx)*0.01;
+      sph.phi=clamp(sph.phi-(e.clientY-ly)*0.01,0.15,Math.PI-0.15);lx=e.clientX;ly=e.clientY;place();};
+    const up=()=>{drag=false;dom.style.cursor="grab";};
+    const wh=e=>{e.preventDefault();sph.radius=clamp(sph.radius*(1+e.deltaY*0.001),80,4000);place();};
+    dom.addEventListener("pointerdown",dn);window.addEventListener("pointermove",mv);
+    window.addEventListener("pointerup",up);dom.addEventListener("wheel",wh,{passive:false});
+    const rs=()=>{const w=el.clientWidth,h=el.clientHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();};
+    const ro=new ResizeObserver(rs);ro.observe(el);rs();place();
+    let raf;const loop=()=>{renderer.render(scene,camera);raf=requestAnimationFrame(loop);};loop();
+    return ()=>{cancelAnimationFrame(raf);ro.disconnect();
+      dom.removeEventListener("pointerdown",dn);window.removeEventListener("pointermove",mv);
+      window.removeEventListener("pointerup",up);dom.removeEventListener("wheel",wh);
+      renderer.dispose();el.removeChild(dom);};
+  },[]);
+  useEffect(()=>{
+    const s=st.current; if(!s.grp)return;
+    while(s.grp.children.length){const m=s.grp.children.pop();m.geometry&&m.geometry.dispose();
+      if(m.material){m.material.map&&m.material.map.dispose();m.material.dispose();}}
+    const geos=buildGeos(W,D,H,cornerR,dividers);
+    const mat=new THREE.MeshStandardMaterial({color:0x9aa0a8,roughness:0.6,metalness:0.05});
+    for(const g of geos) s.grp.add(new THREE.Mesh(g,mat));
+    const cm=new THREE.MeshStandardMaterial({color:0xfbbf24,roughness:0.4,transparent:true,opacity:0.6});
+    const th=3;
+    for(const co of coins){ let g;
+      if(co.kind==="circle") g=new THREE.CylinderGeometry(co.d/2,co.d/2,th,40);
+      else g=new THREE.BoxGeometry(co.w,th,co.h);
+      const m=new THREE.Mesh(g,cm); m.position.set(co.cx,BASE+th/2+0.4,co.cy); s.grp.add(m);
+    }
+    if(showLid){ const [lg]=buildLid(W,D,cornerR,clr,lipH,BASE);
+      const lm=new THREE.MeshStandardMaterial({color:0x60a5fa,roughness:0.5,metalness:0.05,transparent:true,opacity:0.55});
+      for(const g of lg){ g.translate(W/2,H+10,D/2); s.grp.add(new THREE.Mesh(g,lm)); }
+    }
+    s.grp.position.set(-W/2,0,-D/2);
+    s.target.set(0,H/2,0); s.sph.radius=Math.max(W,D,H)*1.7;
+    s.camera.position.set(
+      s.sph.radius*Math.sin(s.sph.phi)*Math.cos(s.sph.theta),
+      H/2+s.sph.radius*Math.cos(s.sph.phi),
+      s.sph.radius*Math.sin(s.sph.phi)*Math.sin(s.sph.theta));
+    s.camera.lookAt(s.target);
+  },[coins,dividers,W,D,H,cornerR,showLid,clr,lipH]);
+  return <div ref={mount} style={{width:"100%",height:"100%"}} />;
+}
+
+function App(){
+  const [W,setW]=useState(150),[D,setD]=useState(100),[H,setH]=useState(50),[cornerR,setCornerR]=useState(5);
+  const [grid,setGrid]=useState(5),[snap,setSnap]=useState(true);
+  const [clr,setClr]=useState(0.3),[lipH,setLipH]=useState(12),[showLid,setShowLid]=useState(false);
+  const [coins,setCoins]=useState([]);
+  const [dividers,setDividers]=useState([]);
+  const [selCoinIds,setSelCoinIds]=useState([]);
+  const [selDivId,setSelDivId]=useState(null);
+  const [order,setOrder]=useState([]);
+  const [guides,setGuides]=useState({x:null,y:null});
+  const [band,setBand]=useState(null);
+  const PAD=16, ALIGN=3;
+  const svgRef=useRef(null), dragRef=useRef(null);
+
+  const noFit=useMemo(()=>coins.filter(c=>!coinFits(c,W,D)).length,[coins,W,D]);
+  const groups=useMemo(()=>{ const m={},ord=[];
+    for(const c of coins){const k=keyOf(c); if(!m[k]){m[k]={key:k,name:c.name||(c.kind==="circle"?("⌀"+c.d):(c.w+"×"+c.h)),count:0};ord.push(k);} m[k].count++; if(c.name)m[k].name=c.name;}
+    return ord.map(k=>m[k]); },[coins]);
+  const presentKeys=groups.map(g=>g.key);
+  const effOrder=[...order.filter(k=>presentKeys.includes(k)), ...presentKeys.filter(k=>!order.includes(k))];
+  const orderedGroups=effOrder.map(k=>groups.find(g=>g.key===k)).filter(Boolean);
+  const moveOrder=(k,dir)=>{const arr=[...effOrder];const i=arr.indexOf(k),j=i+dir; if(j<0||j>=arr.length)return; pushHist(); [arr[i],arr[j]]=[arr[j],arr[i]]; setOrder(arr);};
+
+  // 復原 / 重做
+  const hist=useRef({past:[],future:[]}); const [,bump]=useState(0); const rr=()=>bump(x=>x+1);
+  const takeSnap=()=>({coins,dividers,W,D,H,cornerR,grid,order,clr,lipH});
+  const pushHist=()=>{ const h=hist.current; const s=takeSnap(); const last=h.past[h.past.length-1];
+    if(last&&JSON.stringify(last)===JSON.stringify(s))return; h.past.push(s); if(h.past.length>80)h.past.shift(); h.future=[]; rr(); };
+  const applySnap=(s)=>{ setCoins(s.coins);setDividers(s.dividers);setW(s.W);setD(s.D);setH(s.H);setCornerR(s.cornerR);setGrid(s.grid);setOrder(s.order);setClr(s.clr);setLipH(s.lipH);setSelCoinIds([]);setSelDivId(null); };
+  const undo=()=>{ const h=hist.current; if(!h.past.length)return; h.future.push(takeSnap()); applySnap(h.past.pop()); rr(); };
+  const redo=()=>{ const h=hist.current; if(!h.future.length)return; h.past.push(takeSnap()); applySnap(h.future.pop()); rr(); };
+  const snapV=(v)=> snap ? Math.round(v/grid)*grid : v;
+  const toLocal=(cx,cy)=>{const svg=svgRef.current;const p=svg.createSVGPoint();p.x=cx;p.y=cy;
+    const q=p.matrixTransform(svg.getScreenCTM().inverse());return {x:q.x-PAD,y:q.y-PAD};};
+
+  const addCoin=(p)=>{pushHist();const co={id:uid(),kind:p.kind,name:p.label}; if(p.kind==="circle")co.d=p.d;else{co.w=p.w;co.h=p.h;}
+    const [hw,hh]=halfExtent(co); co.cx=clamp(W/2,WALL+hw,W-WALL-hw); co.cy=clamp(D/2,WALL+hh,D-WALL-hh);
+    setCoins(s=>[...s,co]); setSelCoinIds([co.id]); setSelDivId(null);};
+  const addDiv=(dir)=>{pushHist();const dv={id:uid(),dir,pos:snapV(dir==="v"?W/2:D/2),a:WALL,b:(dir==="v"?D:W)-WALL};
+    setDividers(s=>[...s,dv]); setSelDivId(dv.id); setSelCoinIds([]);};
+  const upCoin=(id,patch)=>setCoins(s=>s.map(x=>x.id===id?{...x,...patch}:x));
+  const upDiv=(id,patch)=>setDividers(s=>s.map(x=>x.id===id?{...x,...patch}:x));
+
+  const moveSel=(dx,dy)=>{
+    if(selCoinIds.length) setCoins(s=>s.map(c=> selCoinIds.includes(c.id)?(()=>{const[hw,hh]=halfExtent(c);return{...c,cx:clamp(c.cx+dx,hw,W-hw),cy:clamp(c.cy+dy,hh,D-hh)};})():c));
+    if(selDivId) setDividers(s=>s.map(d=> d.id===selDivId?{...d,pos:clamp(d.pos+(d.dir==="v"?dx:dy),WALL+1,(d.dir==="v"?W:D)-WALL-1)}:d));
+  };
+  const delSel=()=>{ if(!selCoinIds.length&&!selDivId)return; pushHist(); if(selCoinIds.length)setCoins(s=>s.filter(c=>!selCoinIds.includes(c.id)));
+    if(selDivId)setDividers(s=>s.filter(d=>d.id!==selDivId)); setSelCoinIds([]); setSelDivId(null); };
+
+  // 拖曳
+  useEffect(()=>{
+    const mv=(e)=>{const d=dragRef.current;if(!d)return;const p=toLocal(e.clientX,e.clientY);
+      if(d.type==="coins"){
+        if(d.ids.length===1){ const c=coins.find(x=>x.id===d.ids[0]); if(!c)return; const o=d.orig[c.id]; const [hw,hh]=halfExtent(c);
+          let cx=snapV(o.cx+(p.x-d.px)), cy=snapV(o.cy+(p.y-d.py)); let gx=null,gy=null; const EDGE=6;
+          for(const ot of coins){ if(ot.id===c.id)continue; const [ohw,ohh]=halfExtent(ot);
+            if(Math.abs(cx-ot.cx)<ALIGN){cx=ot.cx;gx=cx;} if(Math.abs(cy-ot.cy)<ALIGN){cy=ot.cy;gy=cy;}
+            if(Math.abs(cy-ot.cy)<hh+ohh){const want=hw+ohw,s=cx>=ot.cx?1:-1; if(Math.abs(Math.abs(cx-ot.cx)-want)<EDGE){cx=ot.cx+s*want;gy=cy;}}
+            if(Math.abs(cx-ot.cx)<hw+ohw){const want=hh+ohh,s=cy>=ot.cy?1:-1; if(Math.abs(Math.abs(cy-ot.cy)-want)<EDGE){cy=ot.cy+s*want;gx=cx;}}
+          }
+          cx=clamp(cx,hw,W-hw); cy=clamp(cy,hh,D-hh); upCoin(c.id,{cx,cy}); setGuides({x:gx,y:gy});
+        } else {
+          let ddx=p.x-d.px, ddy=p.y-d.py; if(snap){ddx=Math.round(ddx/grid)*grid;ddy=Math.round(ddy/grid)*grid;}
+          setCoins(s=>s.map(c=>{ if(!d.ids.includes(c.id))return c; const o=d.orig[c.id]; const [hw,hh]=halfExtent(c);
+            return {...c,cx:clamp(o.cx+ddx,hw,W-hw),cy:clamp(o.cy+ddy,hh,D-hh)};}));
+        }
+      } else if(d.type==="divider"){ const dv=dividers.find(x=>x.id===d.id);if(!dv)return;
+        let pos=snapV(dv.dir==="v"?p.x:p.y);
+        pos=dv.dir==="v"?clamp(pos,WALL+1,W-WALL-1):clamp(pos,WALL+1,D-WALL-1); upDiv(dv.id,{pos});
+      } else if(d.type==="div-end"){ const dv=dividers.find(x=>x.id===d.id);if(!dv)return;
+        const max=(dv.dir==="v"?D:W)-WALL; let v=snapV(dv.dir==="v"?p.y:p.x); v=clamp(v,WALL,max);
+        if(d.end==="a") upDiv(dv.id,{a:Math.min(v,(dv.b!=null?dv.b:max)-1)});
+        else upDiv(dv.id,{b:Math.max(v,(dv.a!=null?dv.a:WALL)+1)});
+      } else if(d.type==="band"){ setBand({x0:d.x0,y0:d.y0,x1:p.x,y1:p.y}); }
+    };
+    const up=(e)=>{const d=dragRef.current;
+      if(d&&d.type==="band"&&svgRef.current){ const p=toLocal(e.clientX,e.clientY);
+        const x0=Math.min(d.x0,p.x),x1=Math.max(d.x0,p.x),y0=Math.min(d.y0,p.y),y1=Math.max(d.y0,p.y);
+        if(x1-x0<3&&y1-y0<3){ setSelCoinIds([]); setSelDivId(null); }
+        else { const ids=coins.filter(c=>{const[hw,hh]=halfExtent(c);return c.cx+hw>=x0&&c.cx-hw<=x1&&c.cy+hh>=y0&&c.cy-hh<=y1;}).map(c=>c.id);
+          setSelCoinIds(ids); setSelDivId(null); } }
+      if(d&&d.pre&&(d.type==="coins"||d.type==="divider"||d.type==="div-end")){ const cur=takeSnap();
+        if(JSON.stringify(cur.coins)!==JSON.stringify(d.pre.coins)||JSON.stringify(cur.dividers)!==JSON.stringify(d.pre.dividers)){
+          hist.current.past.push(d.pre); if(hist.current.past.length>80)hist.current.past.shift(); hist.current.future=[]; rr(); } }
+      dragRef.current=null; setGuides({x:null,y:null}); setBand(null);
+    };
+    window.addEventListener("pointermove",mv);window.addEventListener("pointerup",up);
+    return ()=>{window.removeEventListener("pointermove",mv);window.removeEventListener("pointerup",up);};
+  },[coins,dividers,snap,grid,W,D,selCoinIds]);
+
+  // 鍵盤
+  const nudging=useRef(false);
+  useEffect(()=>{
+    const kd=e=>{
+      if((e.metaKey||e.ctrlKey)&&(e.key==="z"||e.key==="Z")){ e.preventDefault(); e.shiftKey?redo():undo(); return; }
+      if((e.metaKey||e.ctrlKey)&&(e.key==="y"||e.key==="Y")){ e.preventDefault(); redo(); return; }
+      if(document.activeElement.tagName==="INPUT")return;
+      const step=e.shiftKey?grid:1; const arrow=["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(e.key);
+      if(arrow && (selCoinIds.length||selDivId) && !nudging.current){ pushHist(); nudging.current=true; }
+      if(e.key==="ArrowLeft"){moveSel(-step,0);e.preventDefault();}
+      else if(e.key==="ArrowRight"){moveSel(step,0);e.preventDefault();}
+      else if(e.key==="ArrowUp"){moveSel(0,-step);e.preventDefault();}
+      else if(e.key==="ArrowDown"){moveSel(0,step);e.preventDefault();}
+      else if(e.key==="Delete"||e.key==="Backspace"){delSel();}
+    };
+    const ku=e=>{ if(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(e.key)) nudging.current=false; };
+    window.addEventListener("keydown",kd); window.addEventListener("keyup",ku);
+    return()=>{window.removeEventListener("keydown",kd);window.removeEventListener("keyup",ku);};
+  },[selCoinIds,selDivId,coins,dividers,grid,W,D,H,cornerR,order,clr,lipH]);
+
+  const autoArrange=()=>{ if(!coins.length)return; pushHist();
+    const gm={}; for(const c of coins){const k=keyOf(c); (gm[k]=gm[k]||[]).push(c);}
+    const seq=effOrder.filter(k=>gm[k]);
+    const placed=[]; let x=WALL, maxY=WALL, first=true;
+    for(const k of seq){ if(!first)x+=WALL; first=false; const arr=gm[k]; const [hw,hh]=halfExtent(arr[0]); let y=WALL;
+      for(const c of arr){ placed.push({...c,cx:x+hw,cy:y+hh}); y+=2*hh; } x+=2*hw; maxY=Math.max(maxY,y); }
+    setCoins(placed); setSelCoinIds([]); setSelDivId(null);
+    setW(clamp(Math.ceil(x+WALL),50,MAX_WD)); setD(clamp(Math.ceil(maxY+WALL),50,MAX_WD));
+  };
+  const vCenter=()=>{ if(!coins.length)return; pushHist();
+    const cols=clusterColumns(coins); const shiftMap={};
+    for(const col of cols){ let minY=1e9,maxY=-1e9;
+      for(const id of col.ids){const c=coins.find(x=>x.id===id);const[,hh]=halfExtent(c);minY=Math.min(minY,c.cy-hh);maxY=Math.max(maxY,c.cy+hh);}
+      const shift=D/2-(minY+maxY)/2; for(const id of col.ids) shiftMap[id]=shift; }
+    setCoins(s=>s.map(c=>{ if(shiftMap[c.id]==null)return c; const[,hh]=halfExtent(c); return {...c,cy:clamp(c.cy+shiftMap[c.id],hh,D-hh)};}));
+  };
+  const genVDividers=()=>{ if(!coins.length)return; pushHist();
+    const cols=clusterColumns(coins);
+    // 確保相鄰欄之間有 >=牆厚 的縫，不夠就把右側各欄往右推
+    let cum=0; const sh=[0];
+    for(let i=1;i<cols.length;i++){ const gap=cols[i].left-cols[i-1].right; if(gap<WALL)cum+=(WALL-gap); sh[i]=cum; }
+    const shiftById={}; for(let i=0;i<cols.length;i++) for(const id of cols[i].ids) shiftById[id]=sh[i];
+    const newCoins=coins.map(c=> shiftById[c.id]? {...c,cx:c.cx+shiftById[c.id]} : c);
+    let maxRight=0; for(let i=0;i<cols.length;i++){ cols[i]._L=cols[i].left+sh[i]; cols[i]._R=cols[i].right+sh[i]; maxRight=Math.max(maxRight,cols[i]._R); }
+    const newW=clamp(Math.ceil(maxRight+WALL),50,MAX_WD);
+    const vd=[];
+    for(let i=0;i<cols.length-1;i++){ const pos=(cols[i]._R+cols[i+1]._L)/2;
+      const a=Math.max(cols[i].top,cols[i+1].top), b=Math.min(cols[i].bottom,cols[i+1].bottom);
+      if(b-a>2) vd.push({id:uid(),dir:"v",pos:clamp(pos,WALL+1,newW-WALL-1),a:clamp(a,WALL,D-WALL),b:clamp(b,WALL,D-WALL)}); }
+    setCoins(newCoins); setW(newW);
+    setDividers(s=>[...s.filter(d=>d.dir==="h"), ...vd]); setSelDivId(null);
+  };
+  const autoFit=()=>{ if(!coins.length)return; pushHist();
+    let minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9;
+    for(const c of coins){const [hw,hh]=halfExtent(c);minX=Math.min(minX,c.cx-hw);maxX=Math.max(maxX,c.cx+hw);minY=Math.min(minY,c.cy-hh);maxY=Math.max(maxY,c.cy+hh);}
+    const nW=clamp(Math.ceil(maxX-minX+2*WALL),50,MAX_WD), nD=clamp(Math.ceil(maxY-minY+2*WALL),50,MAX_WD);
+    const ox=WALL-minX, oy=WALL-minY;
+    setCoins(s=>s.map(c=>({...c,cx:c.cx+ox,cy:c.cy+oy})));
+    setDividers(s=>s.map(d=>{ const dp=d.dir==="v"?ox:oy, dab=d.dir==="v"?oy:ox;
+      return {...d,pos:d.pos+dp, a:(d.a!=null?d.a+dab:d.a), b:(d.b!=null?d.b+dab:d.b)};})); setW(nW); setD(nD);
+  };
+
+  const exportStl=()=>{const geos=buildGeos(W,D,H,cornerR,dividers);
+    let s="solid box\n"; for(const g of geos){s+=geoFacets(g);g.dispose();} s+="endsolid box\n";
+    download("box.stl",s,"application/octet-stream");};
+  const exportLid=()=>{const [lg]=buildLid(W,D,cornerR,clr,lipH,BASE);
+    let s="solid lid\n"; for(const g of lg){s+=geoFacets(g);g.dispose();} s+="endsolid lid\n";
+    download("lid.stl",s,"application/octet-stream");};
+  const saveJson=()=>download("box.json",JSON.stringify({W,D,H,cornerR,grid,clr,lipH,coins,dividers},null,2),"application/json");
+  const loadJson=(e)=>{const f=e.target.files&&e.target.files[0];if(!f)return;const rd=new FileReader();
+    rd.onload=()=>{try{const o=JSON.parse(rd.result);pushHist();setW(o.W);setD(o.D);setH(o.H);setCornerR(o.cornerR);if(o.grid)setGrid(o.grid);
+      if(o.clr!=null)setClr(o.clr); if(o.lipH!=null)setLipH(o.lipH);
+      setCoins(o.coins||[]);setDividers((o.dividers||[]).map(d=>({...d,a:d.a!=null?d.a:WALL,b:d.b!=null?d.b:((d.dir==="v"?o.D:o.W)-WALL)})));setSelCoinIds([]);setSelDivId(null);}catch{alert("無法讀取此 JSON 檔");}};
+    rd.readAsText(f);};
+
+  const vbW=W+PAD*2, vbH=D+PAD*2;
+  const oneCoin = selCoinIds.length===1 ? coins.find(c=>c.id===selCoinIds[0]) : null;
+  const selDiv  = selDivId ? dividers.find(d=>d.id===selDivId) : null;
+
+  return (
+    <div className="wrap"><div className="card">
+      <div className="topbar">
+        <div className="brand"><span className="dot"></span>陳列盒編輯器
+          <span className="count">{coins.length} 枚　·　{dividers.length} 隔板　·　{W}×{D}×{H}mm</span></div>
+        <div className="actions">
+          <button className="btn ghost" onClick={undo} disabled={!hist.current.past.length}>↩ 返回</button>
+          <button className="btn ghost" onClick={redo} disabled={!hist.current.future.length}>↪ 重做</button>
+          <button className="btn accent" onClick={exportStl}>⬇ 匯出 STL</button>
+          <button className="btn ghost" onClick={saveJson}>存版型</button>
+          <label className="btn ghost" style={{cursor:"pointer"}}>讀取
+            <input type="file" accept=".json" onChange={loadJson} style={{display:"none"}}/></label>
+        </div>
+      </div>
+
+      <div className="main">
+        <div className="editor">
+          <div className="toolrow">
+            <span className="toollbl">放硬幣</span>
+            {COINS.map(p=>(
+              <button key={p.key} className="chip" onClick={()=>addCoin(p)}>
+                <span className={"mark "+(p.kind==="circle"?"circle":"rect")}></span>{p.label}
+              </button>
+            ))}
+          </div>
+          <div className="toolrow">
+            <span className="toollbl">隔板</span>
+            <button className="btn sm" onClick={()=>addDiv("v")}>＋ 直隔板 ｜</button>
+            <button className="btn sm" onClick={()=>addDiv("h")}>＋ 橫隔板 —</button>
+            <button className="btn sm accent" onClick={genVDividers} disabled={!coins.length}>自動生成直隔板</button>
+          </div>
+          <p className="hint">
+            拖曳硬幣會邊緣吸附緊靠　·　Shift＋點＝複選、空白處框選；選取後可一起拖、方向鍵微調　·　隔板可拖端點圓圈裁切長度（局部隔板）
+          </p>
+
+          <svg ref={svgRef} viewBox={`0 0 ${vbW} ${vbH}`} className="svgwrap"
+            style={{aspectRatio:`${vbW} / ${vbH}`}}
+            onPointerDown={e=>{const p=toLocal(e.clientX,e.clientY);dragRef.current={type:"band",x0:p.x,y0:p.y};setBand({x0:p.x,y0:p.y,x1:p.x,y1:p.y});}}>
+            <defs><pattern id="grid" width={grid} height={grid} patternUnits="userSpaceOnUse">
+              <circle cx={grid/2} cy={grid/2} r="0.35" fill="#1e293b"/></pattern></defs>
+            <g transform={`translate(${PAD} ${PAD})`}>
+              <rect x="0" y="0" width={W} height={D} rx={cornerR} fill="#1e293b" stroke="#475569" strokeWidth="1"/>
+              <rect x={WALL} y={WALL} width={Math.max(0,W-2*WALL)} height={Math.max(0,D-2*WALL)}
+                rx={Math.max(0,cornerR-WALL)} fill="url(#grid)" stroke="#334155" strokeWidth="0.6"/>
+
+              {dividers.map(dv=>{
+                const isSel=selDivId===dv.id; const col=isSel?"#f59e0b":"#64748b";
+                const a=dv.a!=null?dv.a:WALL, b=dv.b!=null?dv.b:((dv.dir==="v"?D:W)-WALL); const len=Math.max(0,b-a);
+                const moveDown=e=>{e.stopPropagation();setSelDivId(dv.id);setSelCoinIds([]);dragRef.current={type:"divider",id:dv.id,pre:takeSnap()};};
+                const endDown=(e,end)=>{e.stopPropagation();setSelDivId(dv.id);setSelCoinIds([]);dragRef.current={type:"div-end",id:dv.id,end,pre:takeSnap()};};
+                if(dv.dir==="v") return (
+                  <g key={dv.id}>
+                    <rect x={dv.pos-5} y={a} width="10" height={len} fill="transparent" style={{cursor:"ew-resize"}} onPointerDown={moveDown}/>
+                    <rect x={dv.pos-WALL/2} y={a} width={WALL} height={len} fill={col} stroke={isSel?"#fcd34d":"none"} strokeWidth="0.5" style={{cursor:"ew-resize"}} onPointerDown={moveDown}/>
+                    {isSel && <><circle cx={dv.pos} cy={a} r="3.2" fill="#f59e0b" style={{cursor:"ns-resize"}} onPointerDown={e=>endDown(e,"a")}/>
+                      <circle cx={dv.pos} cy={b} r="3.2" fill="#f59e0b" style={{cursor:"ns-resize"}} onPointerDown={e=>endDown(e,"b")}/></>}
+                  </g>);
+                return (
+                  <g key={dv.id}>
+                    <rect x={a} y={dv.pos-5} width={len} height="10" fill="transparent" style={{cursor:"ns-resize"}} onPointerDown={moveDown}/>
+                    <rect x={a} y={dv.pos-WALL/2} width={len} height={WALL} fill={col} stroke={isSel?"#fcd34d":"none"} strokeWidth="0.5" style={{cursor:"ns-resize"}} onPointerDown={moveDown}/>
+                    {isSel && <><circle cx={a} cy={dv.pos} r="3.2" fill="#f59e0b" style={{cursor:"ew-resize"}} onPointerDown={e=>endDown(e,"a")}/>
+                      <circle cx={b} cy={dv.pos} r="3.2" fill="#f59e0b" style={{cursor:"ew-resize"}} onPointerDown={e=>endDown(e,"b")}/></>}
+                  </g>);
+              })}
+
+              {guides.x!=null && <line x1={guides.x} y1="0" x2={guides.x} y2={D} stroke="#f59e0b" strokeWidth="0.6" strokeDasharray="4 3"/>}
+              {guides.y!=null && <line x1="0" y1={guides.y} x2={W} y2={guides.y} stroke="#f59e0b" strokeWidth="0.6" strokeDasharray="4 3"/>}
+
+              {coins.map(co=>{
+                const isSel=selCoinIds.includes(co.id), fits=coinFits(co,W,D);
+                const stroke=isSel?"#f59e0b":fits?"#34d399":"#f87171";
+                const down=e=>{e.stopPropagation();
+                  if(e.shiftKey){ setSelCoinIds(prev=> prev.includes(co.id)? prev.filter(x=>x!==co.id) : [...prev,co.id]); setSelDivId(null); return; }
+                  let ids = selCoinIds.includes(co.id) ? selCoinIds : [co.id];
+                  if(!selCoinIds.includes(co.id)){ setSelCoinIds([co.id]); setSelDivId(null); }
+                  const p=toLocal(e.clientX,e.clientY); const orig={};
+                  coins.forEach(c=>{ if(ids.includes(c.id)) orig[c.id]={cx:c.cx,cy:c.cy}; });
+                  dragRef.current={type:"coins",ids,px:p.x,py:p.y,orig,pre:takeSnap()};
+                };
+                return (
+                  <g key={co.id} style={{cursor:"move"}} onPointerDown={down}>
+                    {co.kind==="circle"
+                      ? <circle cx={co.cx} cy={co.cy} r={co.d/2} fill="rgba(251,191,36,0.22)" stroke={stroke} strokeWidth={isSel?1.8:1.2}/>
+                      : <rect x={co.cx-co.w/2} y={co.cy-co.h/2} width={co.w} height={co.h} rx="2" fill="rgba(251,191,36,0.22)" stroke={stroke} strokeWidth={isSel?1.8:1.2}/>}
+                    <text x={co.cx} y={co.cy} textAnchor="middle" dominantBaseline="middle"
+                      fontSize="9" fontWeight="700" fill="#0f172a" style={{pointerEvents:"none"}}>{co.name}</text>
+                  </g>
+                );
+              })}
+
+              {band && Math.abs(band.x1-band.x0)>2 &&
+                <rect x={Math.min(band.x0,band.x1)} y={Math.min(band.y0,band.y1)}
+                  width={Math.abs(band.x1-band.x0)} height={Math.abs(band.y1-band.y0)}
+                  fill="rgba(245,158,11,0.10)" stroke="#f59e0b" strokeWidth="0.6" strokeDasharray="3 2"/>}
+            </g>
+          </svg>
+          {noFit>0 && <p className="warn">⚠ 有 {noFit} 枚超出內部空間（紅色）</p>}
+        </div>
+
+        <div className="panel" onFocusCapture={()=>pushHist()}>
+          <div className="section">
+            <h2>{selDiv?"選取隔板": selCoinIds.length>1?`已選 ${selCoinIds.length} 枚`:"選取"}</h2>
+            {oneCoin ? (
+              <div>
+                <div className="row"><label>名稱</label>
+                  <input type="text" value={oneCoin.name} onChange={e=>upCoin(oneCoin.id,{name:e.target.value})}/></div>
+                {oneCoin.kind==="circle"
+                  ? <div className="row"><label>直徑</label><NumberField value={oneCoin.d} min={1} max={MAX_WD} step={0.1} onCommit={v=>upCoin(oneCoin.id,{d:v})}/><span className="unit">mm</span></div>
+                  : <><div className="row"><label>長</label><NumberField value={oneCoin.w} min={1} max={MAX_WD} step={0.5} onCommit={v=>upCoin(oneCoin.id,{w:v})}/><span className="unit">mm</span></div>
+                      <div className="row"><label>寬</label><NumberField value={oneCoin.h} min={1} max={MAX_WD} step={0.5} onCommit={v=>upCoin(oneCoin.id,{h:v})}/><span className="unit">mm</span></div></>}
+                <div className="row"><label>X</label><NumberField value={Math.round(oneCoin.cx*10)/10} min={0} max={MAX_WD} step={0.5} onCommit={v=>upCoin(oneCoin.id,{cx:v})}/><span className="unit">mm</span></div>
+                <div className="row"><label>Y</label><NumberField value={Math.round(oneCoin.cy*10)/10} min={0} max={MAX_WD} step={0.5} onCommit={v=>upCoin(oneCoin.id,{cy:v})}/><span className="unit">mm</span></div>
+                <button className="btn danger" style={{width:"100%",marginTop:4}} onClick={delSel}>刪除</button>
+              </div>
+            ) : selDiv ? (
+              <div>
+                <div className="row"><label>方向</label><span className="fixed">{selDiv.dir==="v"?"直 ｜":"橫 —"}</span></div>
+                <div className="row"><label>位置</label>
+                  <NumberField value={Math.round(selDiv.pos*10)/10} min={WALL} max={MAX_WD} step={0.5}
+                    onCommit={v=>upDiv(selDiv.id,{pos:clamp(v,WALL+1,(selDiv.dir==="v"?W:D)-WALL-1)})}/><span className="unit">mm</span></div>
+                <div className="row"><label>起點</label>
+                  <NumberField value={Math.round((selDiv.a!=null?selDiv.a:WALL)*10)/10} min={WALL} max={MAX_WD} step={0.5}
+                    onCommit={v=>upDiv(selDiv.id,{a:clamp(v,WALL,(selDiv.b!=null?selDiv.b:((selDiv.dir==="v"?D:W)-WALL))-1)})}/><span className="unit">mm</span></div>
+                <div className="row"><label>終點</label>
+                  <NumberField value={Math.round((selDiv.b!=null?selDiv.b:((selDiv.dir==="v"?D:W)-WALL))*10)/10} min={WALL} max={MAX_WD} step={0.5}
+                    onCommit={v=>upDiv(selDiv.id,{b:clamp(v,(selDiv.a!=null?selDiv.a:WALL)+1,(selDiv.dir==="v"?D:W)-WALL)})}/><span className="unit">mm</span></div>
+                <div className="grid2" style={{marginTop:4}}>
+                  <button className="btn" onClick={()=>upDiv(selDiv.id,{a:WALL,b:(selDiv.dir==="v"?D:W)-WALL})}>拉滿</button>
+                  <button className="btn danger" onClick={delSel}>刪除</button>
+                </div>
+              </div>
+            ) : selCoinIds.length>1 ? (
+              <div>
+                <p className="hint" style={{margin:"0 0 8px"}}>拖曳一起移動、方向鍵微調（Shift＝{grid}mm）</p>
+                <button className="btn danger" style={{width:"100%"}} onClick={delSel}>刪除選取 {selCoinIds.length} 枚</button>
+              </div>
+            ) : <p className="hint" style={{margin:0}}>點硬幣/隔板選取；Shift＋點複選；空白處拖曳框選</p>}
+          </div>
+
+          <div className="section">
+            <h2>盒子規格</h2>
+            <div className="row"><label>寬 W（≤300）</label><NumberField value={W} min={50} max={MAX_WD} onCommit={setW}/><span className="unit">mm</span></div>
+            <div className="row"><label>深 D（≤300）</label><NumberField value={D} min={50} max={MAX_WD} onCommit={setD}/><span className="unit">mm</span></div>
+            <div className="row"><label>高 H（≤50）</label><NumberField value={H} min={5} max={MAX_H} onCommit={setH}/><span className="unit">mm</span></div>
+            <div className="row"><label>R 角</label><NumberField value={cornerR} min={0} max={30} step={0.5} onCommit={setCornerR}/><span className="unit">mm</span></div>
+            <div className="row"><label>牆厚</label><span className="fixed">2 mm（固定）</span></div>
+            <div className="row"><label>底厚</label><span className="fixed">1.5 mm（固定）</span></div>
+            <div className="row"><label>格線間距</label><NumberField value={grid} min={1} max={50} step={1} onCommit={setGrid}/><span className="unit">mm</span></div>
+            <label className="toggle" style={{marginTop:6}}>
+              <input type="checkbox" checked={snap} onChange={e=>setSnap(e.target.checked)}/> 吸附格線
+            </label>
+          </div>
+
+          <div className="section">
+            <h2>3D 預覽</h2>
+            <div className="preview"><Preview3D coins={coins} dividers={dividers} W={W} D={D} H={H} cornerR={cornerR} showLid={showLid} clr={clr} lipH={lipH}/></div>
+            <p className="sub">灰＝盒體＋隔板（匯出）　·　金＝硬幣模擬（不匯出）　·　藍＝蓋子（懸浮顯示）</p>
+          </div>
+
+          <div className="section">
+            <h2>排列順序（左→右）</h2>
+            {orderedGroups.length ? orderedGroups.map((g,i)=>(
+              <div className="row" key={g.key}>
+                <span style={{fontSize:13}}>{i+1}.　{g.name}　<span className="fixed">×{g.count}</span></span>
+                <span style={{display:"flex",gap:4}}>
+                  <button className="btn sm" disabled={i===0} onClick={()=>moveOrder(g.key,-1)}>↑</button>
+                  <button className="btn sm" disabled={i===orderedGroups.length-1} onClick={()=>moveOrder(g.key,1)}>↓</button>
+                </span>
+              </div>
+            )) : <p className="hint" style={{margin:0}}>先放入硬幣</p>}
+            <p className="sub">按「自動排列」會照此順序由左到右排</p>
+          </div>
+
+          <div className="section">
+            <h2>蓋子（天地蓋）</h2>
+            <div className="row"><label>公差(單邊)</label><NumberField value={clr} min={0} max={2} step={0.05} onCommit={setClr}/><span className="unit">mm</span></div>
+            <div className="row"><label>蓋緣高</label><NumberField value={lipH} min={3} max={40} step={1} onCommit={setLipH}/><span className="unit">mm</span></div>
+            <p className="sub" style={{margin:"0 0 8px"}}>蓋外尺寸約 {Math.round(W+2*(clr+WALL))}×{Math.round(D+2*(clr+WALL))}mm，套在盒外、留 {clr}mm 不卡</p>
+            <label className="toggle" style={{marginBottom:8}}>
+              <input type="checkbox" checked={showLid} onChange={e=>setShowLid(e.target.checked)}/> 預覽顯示蓋子
+            </label>
+            <button className="btn accent" style={{width:"100%"}} onClick={exportLid}>⬇ 匯出蓋子 STL</button>
+          </div>
+
+          <div className="section">
+            <h2>工具</h2>
+            <button className="btn ghost" style={{width:"100%",marginBottom:8}} onClick={autoArrange} disabled={!coins.length}>自動排列（同面額成排、緊靠）</button>
+            <div className="grid2" style={{marginBottom:8}}>
+              <button className="btn ghost" onClick={vCenter} disabled={!coins.length}>直欄上下置中</button>
+              <button className="btn ghost" onClick={autoFit} disabled={!coins.length}>依硬幣縮邊</button>
+            </div>
+            <button className="btn ghost" style={{width:"100%"}} onClick={()=>{pushHist();setCoins([]);setDividers([]);setSelCoinIds([]);setSelDivId(null);}} disabled={!coins.length&&!dividers.length}>全部清除</button>
+          </div>
+        </div>
+      </div>
+    </div></div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
