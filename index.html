@@ -751,14 +751,10 @@ function App(){
           </div>
 
           <div className="section">
-            <h2>蓋子（天地蓋）</h2>
+            <h2>蓋子（天地蓋）尺寸參考</h2>
             <div className="row"><label>公差(單邊)</label><NumberField value={clr} min={0} max={2} step={0.05} onCommit={setClr}/><span className="unit">mm</span></div>
             <div className="row"><label>蓋緣高</label><NumberField value={lipH} min={3} max={40} step={1} onCommit={setLipH}/><span className="unit">mm</span></div>
-            <p className="sub" style={{margin:"0 0 8px"}}>蓋外尺寸約 {Math.round(W+2*(clr+WALL))}×{Math.round(D+2*(clr+WALL))}mm，套在盒外、留 {clr}mm 不卡</p>
-            <label className="toggle" style={{marginBottom:8}}>
-              <input type="checkbox" checked={showLid} onChange={e=>setShowLid(e.target.checked)}/> 預覽顯示蓋子
-            </label>
-            <button className="btn accent" style={{width:"100%"}} onClick={exportLid}>⬇ 匯出蓋子 STL</button>
+            <p className="sub" style={{margin:"0 0 4px"}}>蓋外尺寸約 {Math.round(W+2*(clr+WALL))}×{Math.round(D+2*(clr+WALL))}mm，套在盒外、留 {clr}mm 不卡。此為在 Fusion 畫蓋子的參考尺寸。</p>
           </div>
 
           <div className="section">
