@@ -345,7 +345,7 @@ function Preview3D({coins,dividers,W,D,H,cornerR,fr,coveR,obr,showLid,clr,lipH})
 
 function App(){
   const [W,setW]=useState(150),[D,setD]=useState(100),[H,setH]=useState(50),[cornerR,setCornerR]=useState(5);
-  const [grid,setGrid]=useState(5),[snap,setSnap]=useState(true);
+  const [grid,setGrid]=useState(5),[snap,setSnap]=useState(false);
   const [clr,setClr]=useState(0.3),[lipH,setLipH]=useState(12),[showLid,setShowLid]=useState(false);
   const [fr,setFr]=useState(0);
   const [coveR,setCoveR]=useState(3);
@@ -499,11 +499,14 @@ function App(){
       return {...d,pos:d.pos+dp, a:(d.a!=null?d.a+dab:d.a), b:(d.b!=null?d.b+dab:d.b)};})); setW(nW); setD(nD);
   };
 
-  // ---- 給 Fusion 360 用：DXF 平面圖（1:1 mm，封閉線框，圓角自己在 CAD 加）----
+  // ---- 給 Fusion 360 用：DXF 平面圖（1:1 mm）外框/內腔含 R 圓角，隔板為直角線框 ----
   const exportDXF=()=>{
-    const poly=(pts)=>{ let s="0\nLWPOLYLINE\n8\n0\n90\n"+pts.length+"\n70\n1\n"; for(const[x,y]of pts) s+="10\n"+x+"\n20\n"+y+"\n"; return s; };
+    const TB=Math.tan(Math.PI/8); // 90° 圓角 bulge
+    const poly=(pts)=>{ let s="0\nLWPOLYLINE\n8\n0\n90\n"+pts.length+"\n70\n1\n"; for(const p of pts){ s+="10\n"+p[0]+"\n20\n"+p[1]+"\n"; if(p[2]) s+="42\n"+p[2]+"\n"; } return s; };
     const rect=(x0,y0,x1,y1)=>poly([[x0,y0],[x1,y0],[x1,y1],[x0,y1]]);
-    const ent=[]; ent.push(rect(0,0,W,D)); ent.push(rect(WALL,WALL,W-WALL,D-WALL));
+    const rrect=(x0,y0,x1,y1,r)=>{ r=Math.max(0,Math.min(r,(x1-x0)/2,(y1-y0)/2)); if(r<0.02) return rect(x0,y0,x1,y1);
+      return poly([[x0+r,y0,0],[x1-r,y0,TB],[x1,y0+r,0],[x1,y1-r,TB],[x1-r,y1,0],[x0+r,y1,TB],[x0,y1-r,0],[x0,y0+r,TB]]); };
+    const ent=[]; ent.push(rrect(0,0,W,D,cornerR)); ent.push(rrect(WALL,WALL,W-WALL,D-WALL,Math.max(0,cornerR-WALL)));
     for(const dv of dividers){ const a=dv.a!=null?dv.a:WALL, b=dv.b!=null?dv.b:((dv.dir==="v"?D:W)-WALL);
       if(dv.dir==="v") ent.push(rect(dv.pos-WALL/2,a,dv.pos+WALL/2,b));
       else ent.push(rect(a,dv.pos-WALL/2,b,dv.pos+WALL/2)); }
@@ -567,7 +570,7 @@ function App(){
   return (
     <div className="wrap"><div className="card">
       <div className="topbar">
-        <div className="brand"><span className="dot"></span>陳列盒編輯器
+        <div className="brand"><span className="dot"></span>欣瀚資訊-陳列盒編輯器
           <span className="count">{coins.length} 枚　·　{dividers.length} 隔板　·　{W}×{D}×{H}mm</span></div>
         <div className="actions">
           <button className="btn ghost" onClick={undo} disabled={!hist.current.past.length}>↩ 返回</button>
@@ -717,9 +720,6 @@ function App(){
             <div className="row"><label>牆厚</label><span className="fixed">2 mm（固定）</span></div>
             <div className="row"><label>底厚</label><span className="fixed">1.5 mm（固定）</span></div>
             <div className="row"><label>格線間距</label><NumberField value={grid} min={1} max={50} step={1} onCommit={setGrid}/><span className="unit">mm</span></div>
-            <label className="toggle" style={{marginTop:6}}>
-              <input type="checkbox" checked={snap} onChange={e=>setSnap(e.target.checked)}/> 吸附格線
-            </label>
           </div>
 
           <div className="section">
