@@ -513,8 +513,8 @@ function App(){
     const dxf="0\nSECTION\n2\nENTITIES\n"+ent.join("")+"0\nENDSEC\n0\nEOF\n";
     download("box-plan.dxf",dxf,"application/dxf");
   };
-  // ---- 尺寸標註圖（SVG，可開啟/列印，照數字在 CAD 畫）----
-  const exportSVG=()=>{
+  // ---- 尺寸標註圖（輸出 PNG，可直接開圖看著畫）----
+  const exportPNG=()=>{
     const M=46, sw=0.5, fs=5, ext=4;
     const X=v=>v, Y=v=>v;
     const parts=[];
@@ -550,7 +550,15 @@ function App(){
     notes.forEach((n,i)=>parts.push(txt(0,notesY+i*7,n,"start","#333")));
     const vbX=-M, vbY=-M-14, vbW=W+2*M, vbH=D+2*M+notesY-D+10;
     const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" width="${vbW*3}" height="${vbH*3}"><rect x="${vbX}" y="${vbY}" width="${vbW}" height="${vbH}" fill="#fff"/>${parts.join("")}</svg>`;
-    download("box-dim.svg",svg,"image/svg+xml");
+    const pxW=Math.round(vbW*3), pxH=Math.round(vbH*3);
+    const url=URL.createObjectURL(new Blob([svg],{type:"image/svg+xml"}));
+    const img=new Image();
+    img.onload=()=>{ const cv=document.createElement("canvas"); cv.width=pxW; cv.height=pxH;
+      const ctx=cv.getContext("2d"); ctx.fillStyle="#fff"; ctx.fillRect(0,0,pxW,pxH); ctx.drawImage(img,0,0,pxW,pxH);
+      URL.revokeObjectURL(url);
+      cv.toBlob(b=>{ const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download="box-dim.png"; a.click(); setTimeout(()=>URL.revokeObjectURL(u),1000); },"image/png"); };
+    img.onerror=()=>{ URL.revokeObjectURL(url); alert("PNG 產生失敗，請改用瀏覽器列印"); };
+    img.src=url;
   };
 
   const exportLid=()=>{const [lg]=buildLid(W,D,cornerR,clr,lipH,BASE);
@@ -576,7 +584,7 @@ function App(){
           <button className="btn ghost" onClick={undo} disabled={!hist.current.past.length}>↩ 返回</button>
           <button className="btn ghost" onClick={redo} disabled={!hist.current.future.length}>↪ 重做</button>
           <button className="btn accent" onClick={exportDXF}>⬇ DXF 平面圖</button>
-          <button className="btn accent" onClick={exportSVG}>⬇ 尺寸圖</button>
+          <button className="btn accent" onClick={exportPNG}>⬇ 尺寸圖 PNG</button>
           <button className="btn ghost" onClick={saveJson}>存版型</button>
           <label className="btn ghost" style={{cursor:"pointer"}}>讀取
             <input type="file" accept=".json" onChange={loadJson} style={{display:"none"}}/></label>
@@ -725,7 +733,7 @@ function App(){
           <div className="section">
             <h2>3D 預覽</h2>
             <div className="preview"><Preview3D coins={coins} dividers={dividers} W={W} D={D} H={H} cornerR={cornerR} fr={fr} coveR={coveR} obr={obr} showLid={showLid} clr={clr} lipH={lipH}/></div>
-            <p className="sub">灰＝盒體＋隔板（匯出）　·　金＝硬幣模擬（不匯出）　·　藍＝蓋子（懸浮顯示）</p>
+            <p className="sub">灰＝盒體＋隔板　·　金＝硬幣模擬（不匯出）</p>
           </div>
 
           <div className="section">
