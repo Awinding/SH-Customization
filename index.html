@@ -347,9 +347,9 @@ function App(){
   const [W,setW]=useState(150),[D,setD]=useState(100),[H,setH]=useState(50),[cornerR,setCornerR]=useState(5);
   const [grid,setGrid]=useState(5),[snap,setSnap]=useState(true);
   const [clr,setClr]=useState(0.3),[lipH,setLipH]=useState(12),[showLid,setShowLid]=useState(false);
-  const [fr,setFr]=useState(1);
+  const [fr,setFr]=useState(0);
   const [coveR,setCoveR]=useState(3);
-  const [obr,setObr]=useState(2);
+  const [obr,setObr]=useState(0);
   const [coins,setCoins]=useState([]);
   const [dividers,setDividers]=useState([]);
   const [selCoinIds,setSelCoinIds]=useState([]);
@@ -499,9 +499,57 @@ function App(){
       return {...d,pos:d.pos+dp, a:(d.a!=null?d.a+dab:d.a), b:(d.b!=null?d.b+dab:d.b)};})); setW(nW); setD(nD);
   };
 
-  const exportStl=()=>{const geos=buildGeos(W,D,H,cornerR,dividers,fr,coveR,obr);
-    let s="solid box\n"; for(const g of geos){s+=geoFacets(g);g.dispose();} s+="endsolid box\n";
-    download("box.stl",s,"application/octet-stream");};
+  // ---- 給 Fusion 360 用：DXF 平面圖（1:1 mm，封閉線框，圓角自己在 CAD 加）----
+  const exportDXF=()=>{
+    const poly=(pts)=>{ let s="0\nLWPOLYLINE\n8\n0\n90\n"+pts.length+"\n70\n1\n"; for(const[x,y]of pts) s+="10\n"+x+"\n20\n"+y+"\n"; return s; };
+    const rect=(x0,y0,x1,y1)=>poly([[x0,y0],[x1,y0],[x1,y1],[x0,y1]]);
+    const ent=[]; ent.push(rect(0,0,W,D)); ent.push(rect(WALL,WALL,W-WALL,D-WALL));
+    for(const dv of dividers){ const a=dv.a!=null?dv.a:WALL, b=dv.b!=null?dv.b:((dv.dir==="v"?D:W)-WALL);
+      if(dv.dir==="v") ent.push(rect(dv.pos-WALL/2,a,dv.pos+WALL/2,b));
+      else ent.push(rect(a,dv.pos-WALL/2,b,dv.pos+WALL/2)); }
+    const dxf="0\nSECTION\n2\nENTITIES\n"+ent.join("")+"0\nENDSEC\n0\nEOF\n";
+    download("box-plan.dxf",dxf,"application/dxf");
+  };
+  // ---- 尺寸標註圖（SVG，可開啟/列印，照數字在 CAD 畫）----
+  const exportSVG=()=>{
+    const M=46, sw=0.5, fs=5, ext=4;
+    const X=v=>v, Y=v=>v;
+    const parts=[];
+    const line=(x1,y1,x2,y2,extra="")=>`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#0a6" stroke-width="${sw}" ${extra}/>`;
+    const txt=(x,y,t,anchor="middle",col="#0a6")=>`<text x="${x}" y="${y}" font-size="${fs}" fill="${col}" text-anchor="${anchor}" font-family="sans-serif">${t}</text>`;
+    const hdim=(x1,x2,y,t)=>{ parts.push(line(x1,y,x2,y)); parts.push(line(x1,y-ext,x1,y+ext)); parts.push(line(x2,y-ext,x2,y+ext)); parts.push(txt((x1+x2)/2,y-1.5,t)); };
+    const vdim=(y1,y2,x,t)=>{ parts.push(line(x,y1,x,y2)); parts.push(line(x-ext,y1,x+ext,y1)); parts.push(line(x-ext,y2,x+ext,y2)); parts.push(`<text x="${x-1.5}" y="${(y1+y2)/2}" font-size="${fs}" fill="#0a6" text-anchor="middle" font-family="sans-serif" transform="rotate(-90 ${x-1.5} ${(y1+y2)/2})">${t}</text>`); };
+    // 盒體
+    parts.push(`<rect x="0" y="0" width="${W}" height="${D}" rx="${cornerR}" ry="${cornerR}" fill="#eee" stroke="#333" stroke-width="0.8"/>`);
+    parts.push(`<rect x="${WALL}" y="${WALL}" width="${W-2*WALL}" height="${D-2*WALL}" fill="#fff" stroke="#999" stroke-width="0.4" stroke-dasharray="2 1.5"/>`);
+    const vdivs=dividers.filter(d=>d.dir==="v").sort((a,b)=>a.pos-b.pos);
+    const hdivs=dividers.filter(d=>d.dir==="h").sort((a,b)=>a.pos-b.pos);
+    for(const dv of dividers){ const a=dv.a!=null?dv.a:WALL, b=dv.b!=null?dv.b:((dv.dir==="v"?D:W)-WALL);
+      const x0=dv.dir==="v"?dv.pos-WALL/2:a, y0=dv.dir==="v"?a:dv.pos-WALL/2, ww=dv.dir==="v"?WALL:(b-a), hh=dv.dir==="v"?(b-a):WALL;
+      parts.push(`<rect x="${x0}" y="${y0}" width="${ww}" height="${hh}" fill="#bbb" stroke="#333" stroke-width="0.5"/>`); }
+    // 寬度尺寸鏈（含牆/隔間/隔板）
+    let xs=[0,WALL]; for(const d of vdivs) xs.push(d.pos-WALL/2,d.pos+WALL/2); xs.push(W-WALL,W);
+    xs=[...new Set(xs)].sort((a,b)=>a-b);
+    for(let i=0;i<xs.length-1;i++){ const w=+(xs[i+1]-xs[i]).toFixed(1); if(w>0.2) hdim(xs[i],xs[i+1],-12,w); }
+    hdim(0,W,-26,`寬 W = ${W}`);
+    // 深度尺寸鏈
+    let ys=[0,WALL]; for(const d of hdivs) ys.push(d.pos-WALL/2,d.pos+WALL/2); ys.push(D-WALL,D);
+    ys=[...new Set(ys)].sort((a,b)=>a-b);
+    for(let i=0;i<ys.length-1;i++){ const h=+(ys[i+1]-ys[i]).toFixed(1); if(h>0.2) vdim(ys[i],ys[i+1],-12,h); }
+    vdim(0,D,-26,`深 D = ${D}`);
+    // 隔板位置標註（中心線距左/上）
+    vdivs.forEach((d,i)=>{ const a=d.a!=null?d.a:WALL, b=d.b!=null?d.b:D; parts.push(txt(d.pos,D+10+i*7,`直隔板 中心 x=${+d.pos.toFixed(1)}　範圍 y:${+a.toFixed(1)}→${+b.toFixed(1)}`,"middle","#444")); });
+    hdivs.forEach((d,i)=>{ const a=d.a!=null?d.a:WALL, b=d.b!=null?d.b:W; parts.push(txt(0,D+10+(vdivs.length+i)*7,`橫隔板 中心 y=${+d.pos.toFixed(1)}　範圍 x:${+a.toFixed(1)}→${+b.toFixed(1)}`,"start","#444")); });
+    const notesY=D+10+(vdivs.length+hdivs.length)*7+6;
+    const notes=[`高 H = ${H}　牆厚 = ${WALL}　底厚 = ${BASE}　外角 R = ${cornerR}`,
+                 `建議在 Fusion 加：內側牆腳圓角 R3~5、頂緣導角自訂；外底邊保持直角(平底可印)`,
+                 `虛線 = 內腔範圍　灰塊 = 隔板(厚 ${WALL}mm)　單位 mm 1:1`];
+    notes.forEach((n,i)=>parts.push(txt(0,notesY+i*7,n,"start","#333")));
+    const vbX=-M, vbY=-M-14, vbW=W+2*M, vbH=D+2*M+notesY-D+10;
+    const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" width="${vbW*3}" height="${vbH*3}"><rect x="${vbX}" y="${vbY}" width="${vbW}" height="${vbH}" fill="#fff"/>${parts.join("")}</svg>`;
+    download("box-dim.svg",svg,"image/svg+xml");
+  };
+
   const exportLid=()=>{const [lg]=buildLid(W,D,cornerR,clr,lipH,BASE);
     let s="solid lid\n"; for(const g of lg){s+=geoFacets(g);g.dispose();} s+="endsolid lid\n";
     download("lid.stl",s,"application/octet-stream");};
@@ -524,7 +572,8 @@ function App(){
         <div className="actions">
           <button className="btn ghost" onClick={undo} disabled={!hist.current.past.length}>↩ 返回</button>
           <button className="btn ghost" onClick={redo} disabled={!hist.current.future.length}>↪ 重做</button>
-          <button className="btn accent" onClick={exportStl}>⬇ 匯出 STL</button>
+          <button className="btn accent" onClick={exportDXF}>⬇ DXF 平面圖</button>
+          <button className="btn accent" onClick={exportSVG}>⬇ 尺寸圖</button>
           <button className="btn ghost" onClick={saveJson}>存版型</button>
           <label className="btn ghost" style={{cursor:"pointer"}}>讀取
             <input type="file" accept=".json" onChange={loadJson} style={{display:"none"}}/></label>
