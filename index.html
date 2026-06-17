@@ -678,6 +678,16 @@ function App(){
 
         <div className="panel" onFocusCapture={()=>pushHist()}>
           <div className="section">
+            <h2>工具</h2>
+            <button className="btn accent" style={{width:"100%",marginBottom:8}} onClick={autoArrange} disabled={!coins.length}>自動排列（同面額成排、緊靠）</button>
+            <div className="grid2" style={{marginBottom:8}}>
+              <button className="btn ghost" onClick={vCenter} disabled={!coins.length}>直欄上下置中</button>
+              <button className="btn ghost" onClick={autoFit} disabled={!coins.length}>依硬幣縮邊</button>
+            </div>
+            <button className="btn ghost" style={{width:"100%"}} onClick={()=>{pushHist();setCoins([]);setDividers([]);setSelCoinIds([]);setSelDivId(null);}} disabled={!coins.length&&!dividers.length}>全部清除</button>
+          </div>
+
+          <div className="section">
             <h2>{selDiv?"選取隔板": selCoinIds.length>1?`已選 ${selCoinIds.length} 枚`:"選取"}</h2>
             {oneCoin ? (
               <div>
@@ -755,16 +765,6 @@ function App(){
             <div className="row"><label>公差(單邊)</label><NumberField value={clr} min={0} max={2} step={0.05} onCommit={setClr}/><span className="unit">mm</span></div>
             <div className="row"><label>蓋緣高</label><NumberField value={lipH} min={3} max={40} step={1} onCommit={setLipH}/><span className="unit">mm</span></div>
             <p className="sub" style={{margin:"0 0 4px"}}>蓋外尺寸約 {Math.round(W+2*(clr+WALL))}×{Math.round(D+2*(clr+WALL))}mm，套在盒外、留 {clr}mm 不卡。此為在 Fusion 畫蓋子的參考尺寸。</p>
-          </div>
-
-          <div className="section">
-            <h2>工具</h2>
-            <button className="btn ghost" style={{width:"100%",marginBottom:8}} onClick={autoArrange} disabled={!coins.length}>自動排列（同面額成排、緊靠）</button>
-            <div className="grid2" style={{marginBottom:8}}>
-              <button className="btn ghost" onClick={vCenter} disabled={!coins.length}>直欄上下置中</button>
-              <button className="btn ghost" onClick={autoFit} disabled={!coins.length}>依硬幣縮邊</button>
-            </div>
-            <button className="btn ghost" style={{width:"100%"}} onClick={()=>{pushHist();setCoins([]);setDividers([]);setSelCoinIds([]);setSelDivId(null);}} disabled={!coins.length&&!dividers.length}>全部清除</button>
           </div>
         </div>
       </div>
